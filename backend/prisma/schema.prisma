@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  employeeId String?  @unique
+  name       String
+  email      String   @unique
+  role       UserRole @default(EMPLOYEE)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  goalSheets GoalSheet[]
+}
+
+model GoalSheet {
+  id          Int             @id @default(autoincrement())
+  title       String
+  cycle       String
+  status      GoalSheetStatus @default(DRAFT)
+  ownerId     Int
+  owner       User            @relation(fields: [ownerId], references: [id])
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  goals Goal[]
+}
+
+model Goal {
+  id             Int       @id @default(autoincrement())
+  goalSheetId    Int
+  goalSheet      GoalSheet @relation(fields: [goalSheetId], references: [id])
+  description    String
+  plannedMetric  String?
+  actualMetric   String?
+  completionRate Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+enum UserRole {
+  EMPLOYEE
+  MANAGER
+  HR
+  ADMIN
+}
+
+enum GoalSheetStatus {
+  DRAFT
+  SUBMITTED
+  L1_APPROVED
+  REVISION_REQUESTED
+  CLOSED
+}
