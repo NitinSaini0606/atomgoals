@@ -25,7 +25,8 @@ model User {
   goalSheets       GoalSheet[]
   managedGoals     Goal[]        @relation("GoalManager")
   achievements     Achievement[]
-  checkIns         CheckIn[]
+  checkIns         CheckIn[]      @relation("EmployeeCheckIns")
+  managerCheckIns  CheckIn[]      @relation("ManagerCheckIns")
   auditLogs        AuditLog[]
   ownedSharedGoals SharedGoal[]  @relation("SharedGoalOwner")
   sharedGoals      SharedGoal[]  @relation("SharedGoalMembers")
@@ -100,7 +101,6 @@ model Goal {
   updatedAt         DateTime   @updatedAt
 
   achievements Achievement[]
-  checkIns     CheckIn[]
 
   @@index([ownerId])
   @@index([managerId])
@@ -110,41 +110,46 @@ model Goal {
 }
 
 model Achievement {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  evidenceUrl String?
-  impact      String?
-  goalId      Int
-  goal        Goal     @relation(fields: [goalId], references: [id])
-  userId      Int
-  user        User     @relation(fields: [userId], references: [id])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             Int               @id @default(autoincrement())
+  goalId         Int
+  goal           Goal              @relation(fields: [goalId], references: [id])
+  userId         Int
+  user           User              @relation(fields: [userId], references: [id])
+  quarter        String
+  actualValue    String?
+  status         AchievementStatus @default(NOT_STARTED)
+  completionDate DateTime?
+  employeeNote   String?
+  progressScore  Float             @default(0)
+  weightedScore  Float             @default(0)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 
+  @@unique([goalId, quarter])
   @@index([goalId])
   @@index([userId])
+  @@index([quarter])
 }
 
 model CheckIn {
-  id              Int           @id @default(autoincrement())
-  summary         String
-  blockers        String?
-  employeeComment String?
-  managerComment  String?
-  progressPercent Int           @default(0)
-  status          CheckInStatus @default(DRAFT)
-  goalId          Int
-  goal            Goal          @relation(fields: [goalId], references: [id])
-  userId          Int
-  user            User          @relation(fields: [userId], references: [id])
-  cycleId         Int
-  cycle           GoalCycle     @relation(fields: [cycleId], references: [id])
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id          Int           @id @default(autoincrement())
+  userId      Int
+  user        User          @relation("EmployeeCheckIns", fields: [userId], references: [id])
+  managerId   Int
+  manager     User          @relation("ManagerCheckIns", fields: [managerId], references: [id])
+  quarter     String
+  comment     String?
+  status      CheckInStatus @default(DRAFT)
+  completedAt DateTime?
+  cycleId     Int?
+  cycle       GoalCycle?    @relation(fields: [cycleId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
-  @@index([goalId])
+  @@unique([userId, managerId, quarter])
   @@index([userId])
+  @@index([managerId])
+  @@index([quarter])
   @@index([cycleId])
 }
 
@@ -229,6 +234,13 @@ enum CheckInStatus {
   DRAFT
   SUBMITTED
   REVIEWED
+  COMPLETED
+}
+
+enum AchievementStatus {
+  NOT_STARTED
+  ON_TRACK
+  COMPLETED
 }
 
 enum SharedGoalStatus {

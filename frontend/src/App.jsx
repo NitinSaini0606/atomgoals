@@ -19,6 +19,14 @@ const demoUsers = [
   { role: 'Admin', email: 'admin@atomgoals.com' }
 ];
 
+const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+
+const formatScore = (value, suffix = '') => {
+  const numericValue = Number(value || 0);
+  const rounded = Math.round(numericValue * 100) / 100;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}${suffix}`;
+};
+
 function App() {
   const [email, setEmail] = useState('employee@atomgoals.com');
   const [password, setPassword] = useState('password123');
@@ -356,7 +364,7 @@ function EmployeeGoalSheet({ session }) {
         <Message tone="warning" messages={[`L1 Manager feedback: ${goalSheet.managerFeedback}`]} />
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <form onSubmit={saveGoal} className="rounded-lg border border-line bg-white p-5 shadow-subtle">
           <div className="border-b border-line pb-4">
             <h3 className="text-lg font-semibold">{editingId ? 'Edit Goal' : 'Add Goal'}</h3>
@@ -410,7 +418,7 @@ function EmployeeGoalSheet({ session }) {
           </div>
         </form>
 
-        <div className="rounded-lg border border-line bg-white shadow-subtle">
+        <div className="min-w-0 rounded-lg border border-line bg-white shadow-subtle">
           <div className="flex flex-col justify-between gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center">
             <div>
               <h3 className="text-lg font-semibold">Current Goals</h3>
@@ -427,7 +435,7 @@ function EmployeeGoalSheet({ session }) {
             )}
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="w-full max-w-full overflow-x-auto">
             <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-muted">
                 <tr>
@@ -464,7 +472,178 @@ function EmployeeGoalSheet({ session }) {
           </div>
         </div>
       </div>
+
+      {isApprovedLocked && <EmployeeAchievementTracking session={session} />}
     </section>
+  );
+}
+
+function EmployeeAchievementTracking({ session }) {
+  const [quarter, setQuarter] = useState('Q1');
+  const [goals, setGoals] = useState([]);
+  const [forms, setForms] = useState({});
+  const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${session.token}`,
+    'Content-Type': 'application/json'
+  }), [session.token]);
+
+  const loadAchievements = async () => {
+    setIsLoading(true);
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/employee/achievements?quarter=${quarter}`, {
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not load Quarterly Updates.');
+
+      setGoals(data.goals || []);
+      const nextForms = {};
+      for (const goal of data.goals || []) {
+        nextForms[goal.id] = {
+          id: goal.achievement?.id,
+          actualValue: goal.achievement?.actualValue || '',
+          status: goal.achievement?.status || 'NOT_STARTED',
+          completionDate: goal.achievement?.completionDate || '',
+          employeeNote: goal.achievement?.employeeNote || ''
+        };
+      }
+      setForms(nextForms);
+    } catch (loadError) {
+      setErrors([loadError.message]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAchievements();
+  }, [quarter]);
+
+  const updateForm = (goalId, patch) => {
+    setForms({ ...forms, [goalId]: { ...forms[goalId], ...patch } });
+  };
+
+  const saveAchievement = async (goal) => {
+    setErrors([]);
+    setNotice('');
+
+    const form = forms[goal.id] || {};
+    const payload = { ...form, goalId: goal.id, quarter };
+    const url = form.id
+      ? `${API_BASE_URL}/employee/achievements/${form.id}`
+      : `${API_BASE_URL}/employee/achievements`;
+
+    try {
+      const response = await fetch(url, {
+        method: form.id ? 'PUT' : 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ErrorWithMessages(data.message || 'Could not save Quarterly Update.', data.errors);
+      }
+
+      setNotice('Quarterly Update saved.');
+      await loadAchievements();
+    } catch (saveError) {
+      setErrors(saveError.messages || [saveError.message]);
+    }
+  };
+
+  return (
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
+      <div className="flex flex-col justify-between gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-lg font-semibold">Achievement Tracking</h3>
+          <p className="mt-1 text-sm text-muted">Update Actual Achievement and review Planned vs Actual progress for approved locked goals.</p>
+        </div>
+        <label className="text-sm font-semibold">
+          Quarter
+          <select
+            value={quarter}
+            onChange={(event) => setQuarter(event.target.value)}
+            className="ml-3 rounded-md border border-line px-3 py-2 text-sm font-normal outline-none focus:border-brand"
+          >
+            {quarters.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="p-5">
+        {notice && <Message tone="success" messages={[notice]} />}
+        {errors.length > 0 && <Message tone="error" messages={errors} />}
+        {isLoading ? (
+          <p className="text-sm text-muted">Loading Quarterly Updates...</p>
+        ) : (
+          <div className="w-full max-w-full overflow-x-auto">
+            <table className="min-w-[960px] table-fixed text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-muted">
+                <tr>
+                  <th className="w-44 px-3 py-3 font-semibold">Goal Title</th>
+                  <th className="w-32 px-3 py-3 font-semibold">Planned Target</th>
+                  <th className="w-36 px-3 py-3 font-semibold">Actual Achievement</th>
+                  <th className="w-36 px-3 py-3 font-semibold">Status</th>
+                  <th className="w-36 px-3 py-3 font-semibold">Completion Date</th>
+                  <th className="w-52 px-3 py-3 font-semibold">Employee Note</th>
+                  <th className="w-32 px-3 py-3 font-semibold">Progress Score</th>
+                  <th className="w-32 px-3 py-3 font-semibold">Weighted Score</th>
+                  <th className="w-24 px-3 py-3 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {goals.map((goal) => {
+                  const form = forms[goal.id] || {};
+                  return (
+                    <tr key={goal.id}>
+                      <td className="whitespace-normal break-words px-3 py-4 font-medium">{goal.title}</td>
+                      <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.targetValue}</td>
+                      <td className="px-3 py-4">
+                        <InlineInput value={form.actualValue || ''} onChange={(value) => updateForm(goal.id, { actualValue: value })} />
+                      </td>
+                      <td className="px-3 py-4">
+                        <select
+                          value={form.status || 'NOT_STARTED'}
+                          onChange={(event) => updateForm(goal.id, { status: event.target.value })}
+                          className="rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+                        >
+                          {['NOT_STARTED', 'ON_TRACK', 'COMPLETED'].map((item) => <option key={item} value={item}>{item}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-3 py-4">
+                        <InlineInput type="date" value={form.completionDate || ''} onChange={(value) => updateForm(goal.id, { completionDate: value })} />
+                      </td>
+                      <td className="px-3 py-4">
+                        <input
+                          value={form.employeeNote || ''}
+                          onChange={(event) => updateForm(goal.id, { employeeNote: event.target.value })}
+                          className="w-full rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+                        />
+                      </td>
+                      <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.progressScore, '%')}</td>
+                      <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.weightedScore)}</td>
+                      <td className="px-3 py-4">
+                        <button onClick={() => saveAchievement(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white">
+                          Save
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -631,8 +810,8 @@ function ManagerApprovalDashboard({ session }) {
       {notice && <Message tone="success" messages={[notice]} />}
       {errors.length > 0 && <Message tone="error" messages={errors} />}
 
-      <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
-        <aside className="rounded-lg border border-line bg-white shadow-subtle">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
+        <aside className="min-w-0 rounded-lg border border-line bg-white shadow-subtle">
           <div className="border-b border-line px-5 py-4">
             <h3 className="text-lg font-semibold">Submitted Goal Sheets</h3>
             <p className="mt-1 text-sm text-muted">{isLoading ? 'Loading...' : `${goalSheets.length} awaiting review`}</p>
@@ -654,7 +833,7 @@ function ManagerApprovalDashboard({ session }) {
           </div>
         </aside>
 
-        <div className="rounded-lg border border-line bg-white shadow-subtle">
+        <div className="min-w-0 overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
           {!selectedSheet ? (
             <div className="px-5 py-8 text-sm text-muted">Select a Submitted Goal Sheet to review.</div>
           ) : (
@@ -673,8 +852,8 @@ function ManagerApprovalDashboard({ session }) {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[1080px] text-left text-sm">
+              <div className="w-full max-w-full overflow-x-auto">
+                <table className="min-w-[980px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-muted">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Thrust Area</th>
@@ -743,7 +922,207 @@ function ManagerApprovalDashboard({ session }) {
           )}
         </div>
       </div>
+
+      <ManagerCheckIns session={session} />
     </section>
+  );
+}
+
+function ManagerCheckIns({ session }) {
+  const [quarter, setQuarter] = useState('Q1');
+  const [employees, setEmployees] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [progress, setProgress] = useState(null);
+  const [comment, setComment] = useState('');
+  const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${session.token}`,
+    'Content-Type': 'application/json'
+  }), [session.token]);
+
+  const loadCheckIns = async () => {
+    setIsLoading(true);
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/checkins?quarter=${quarter}`, {
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not load Quarterly Check-ins.');
+
+      setEmployees(data.employees || []);
+      setSelectedEmployee(null);
+      setProgress(null);
+    } catch (loadError) {
+      setErrors([loadError.message]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCheckIns();
+  }, [quarter]);
+
+  const openEmployeeProgress = async (employeeId) => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/checkins/${employeeId}?quarter=${quarter}`, {
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not open employee progress.');
+
+      setSelectedEmployee(data.employee);
+      setProgress(data);
+      setComment(data.checkIn?.comment || '');
+    } catch (openError) {
+      setErrors([openError.message]);
+    }
+  };
+
+  const completeCheckIn = async () => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/checkins/${selectedEmployee.id}`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ quarter, comment, completed: true })
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not complete Quarterly Check-in.');
+
+      setProgress({ ...progress, checkIn: data.checkIn });
+      setNotice('Quarterly Check-in completed.');
+      await loadCheckIns();
+    } catch (saveError) {
+      setErrors([saveError.message]);
+    }
+  };
+
+  return (
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
+      <div className="flex flex-col justify-between gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-lg font-semibold">Quarterly Check-ins</h3>
+          <p className="mt-1 text-sm text-muted">Review Planned vs Actual progress and complete manager check-ins for direct reports.</p>
+        </div>
+        <label className="text-sm font-semibold">
+          Quarter
+          <select
+            value={quarter}
+            onChange={(event) => setQuarter(event.target.value)}
+            className="ml-3 rounded-md border border-line px-3 py-2 text-sm font-normal outline-none focus:border-brand"
+          >
+            {quarters.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid min-w-0 gap-6 p-5 lg:grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
+        <aside className="min-w-0 rounded-lg border border-line">
+          <div className="border-b border-line px-4 py-3">
+            <h4 className="font-semibold">Team Members</h4>
+            <p className="mt-1 text-sm text-muted">{isLoading ? 'Loading...' : `${employees.length} approved Goal Sheets`}</p>
+          </div>
+          <div className="divide-y divide-line">
+            {employees.length === 0 && <p className="px-4 py-4 text-sm text-muted">No approved locked Goal Sheets for this quarter.</p>}
+            {employees.map((item) => (
+              <button
+                key={item.employee.id}
+                onClick={() => openEmployeeProgress(item.employee.id)}
+                className="block w-full px-4 py-3 text-left hover:bg-slate-50"
+              >
+                <span className="block text-sm font-semibold">{item.employee.name}</span>
+                <span className="mt-1 block text-sm text-muted">
+                  Weighted Score: {formatScore(item.weightedScore)} | {item.checkIn?.status || 'DRAFT'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="min-w-0">
+          {notice && <Message tone="success" messages={[notice]} />}
+          {errors.length > 0 && <Message tone="error" messages={errors} />}
+
+          {!progress ? (
+            <p className="rounded-lg border border-line px-5 py-8 text-sm text-muted">Select a team member to open Quarterly Check-in progress.</p>
+          ) : (
+            <div className="space-y-5">
+              {progress.checkIn?.status === 'COMPLETED' && (
+                <Message tone="success" messages={['Check-in completed and locked.']} />
+              )}
+              <div>
+                <h4 className="text-lg font-semibold">{selectedEmployee.name}</h4>
+                <p className="mt-1 text-sm text-muted">Quarter: {quarter} | Check-in: {progress.checkIn?.status || 'DRAFT'}</p>
+              </div>
+
+              <div className="w-full max-w-full overflow-x-auto rounded-lg border border-line">
+                <table className="min-w-[840px] table-fixed text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-muted">
+                    <tr>
+                      <th className="w-44 px-3 py-3 font-semibold">Goal Title</th>
+                      <th className="w-32 px-3 py-3 font-semibold">Planned Target</th>
+                      <th className="w-36 px-3 py-3 font-semibold">Actual Achievement</th>
+                      <th className="w-36 px-3 py-3 font-semibold">Employee Status</th>
+                      <th className="w-32 px-3 py-3 font-semibold">Progress Score</th>
+                      <th className="w-32 px-3 py-3 font-semibold">Weighted Score</th>
+                      <th className="w-56 px-3 py-3 font-semibold">Employee Note</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {progress.goals.map((goal) => (
+                      <tr key={goal.id}>
+                        <td className="whitespace-normal break-words px-3 py-4 font-medium">{goal.title}</td>
+                        <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.targetValue}</td>
+                        <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.achievement?.actualValue || '-'}</td>
+                        <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.achievement?.status || 'NOT_STARTED'}</td>
+                        <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.progressScore, '%')}</td>
+                        <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.weightedScore)}</td>
+                        <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.achievement?.employeeNote || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <label className="block text-sm font-semibold">
+                Manager Check-in Comment
+                {progress.checkIn?.status === 'COMPLETED' ? (
+                  <div className="mt-2 min-h-20 rounded-md border border-line bg-slate-50 px-3 py-3 text-sm font-normal leading-6 text-ink">
+                    {progress.checkIn.comment}
+                  </div>
+                ) : (
+                  <textarea
+                    value={comment}
+                    onChange={(event) => setComment(event.target.value)}
+                    className="mt-2 min-h-24 w-full rounded-md border border-line px-3 py-3 text-sm font-normal outline-none focus:border-brand"
+                    placeholder="Summarize the quarterly discussion, risks, and next actions."
+                  />
+                )}
+              </label>
+              {progress.checkIn?.status !== 'COMPLETED' && (
+                <button onClick={completeCheckIn} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+                  Mark Check-in Completed
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

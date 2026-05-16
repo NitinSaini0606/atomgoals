@@ -2,6 +2,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import authRouter from './routes/auth.js';
+import employeeAchievementsRouter from './routes/employeeAchievements.js';
 import employeeGoalsRouter from './routes/employeeGoals.js';
 import managerGoalsRouter from './routes/managerGoals.js';
 
@@ -16,6 +17,7 @@ app.use(express.json());
 
 app.use('/auth', authRouter);
 app.use('/employee', employeeGoalsRouter);
+app.use('/employee', employeeAchievementsRouter);
 app.use('/manager', managerGoalsRouter);
 
 app.get('/health', (_req, res) => {

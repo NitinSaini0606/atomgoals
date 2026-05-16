@@ -3,10 +3,15 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
 
 const router = express.Router();
+const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+
+const validateQuarter = (quarter) => quarters.includes(quarter);
+
+const toDateInput = (date) => date ? date.toISOString().slice(0, 10) : '';
 
 const mapGoal = (goal) => ({
   ...goal,
-  deadline: goal.deadline ? goal.deadline.toISOString().slice(0, 10) : ''
+  deadline: toDateInput(goal.deadline)
 });
 
 const mapSheet = (sheet) => ({
@@ -67,6 +72,49 @@ const validateWeights = (goals) => {
   }
 
   return errors;
+};
+
+const mapAchievement = (achievement) => achievement ? ({
+  ...achievement,
+  completionDate: toDateInput(achievement.completionDate)
+}) : null;
+
+const mapCheckIn = (checkIn) => checkIn ? ({
+  ...checkIn,
+  completedAt: checkIn.completedAt ? checkIn.completedAt.toISOString() : null
+}) : null;
+
+const mapProgressGoal = (goal, quarter) => ({
+  ...mapGoal(goal),
+  achievement: mapAchievement(goal.achievements.find((item) => item.quarter === quarter))
+});
+
+const getApprovedSheetForReport = async (employeeId, managerId, quarter) => {
+  return prisma.goalSheet.findFirst({
+    where: {
+      ownerId: Number(employeeId),
+      status: 'APPROVED_LOCKED',
+      owner: { managerId: Number(managerId) }
+    },
+    include: {
+      owner: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          employeeCode: true
+        }
+      },
+      cycle: true,
+      goals: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          achievements: { where: { quarter } }
+        }
+      }
+    },
+    orderBy: { approvedAt: 'desc' }
+  });
 };
 
 router.use(requireAuth, requireRole('MANAGER'));
@@ -291,6 +339,188 @@ router.post('/goal-sheets/:id/approve', async (req, res, next) => {
     });
 
     return res.json({ goalSheet: mapSheet(updatedSheet) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/checkins', async (req, res, next) => {
+  try {
+    const quarter = req.query.quarter;
+
+    if (!validateQuarter(quarter)) {
+      return res.status(400).json({ message: 'Quarter is required and must be Q1, Q2, Q3, or Q4.' });
+    }
+
+    const sheets = await prisma.goalSheet.findMany({
+      where: {
+        status: 'APPROVED_LOCKED',
+        owner: { managerId: Number(req.user.sub) }
+      },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            employeeCode: true
+          }
+        },
+        cycle: true,
+        goals: {
+          include: {
+            achievements: { where: { quarter } }
+          }
+        }
+      },
+      orderBy: { approvedAt: 'desc' }
+    });
+
+    const employeeIds = sheets.map((sheet) => sheet.ownerId);
+    const checkIns = await prisma.checkIn.findMany({
+      where: {
+        userId: { in: employeeIds },
+        managerId: Number(req.user.sub),
+        quarter
+      }
+    });
+
+    return res.json({
+      employees: sheets.map((sheet) => {
+        const checkIn = checkIns.find((item) => item.userId === sheet.ownerId);
+        const weightedScore = sheet.goals.reduce((sum, goal) => {
+          const achievement = goal.achievements[0];
+          return sum + Number(achievement?.weightedScore || 0);
+        }, 0);
+
+        return {
+          employee: sheet.owner,
+          goalSheetId: sheet.id,
+          quarter,
+          goalCount: sheet.goals.length,
+          weightedScore: Number(weightedScore.toFixed(2)),
+          checkIn: mapCheckIn(checkIn)
+        };
+      })
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/checkins/:employeeId', async (req, res, next) => {
+  try {
+    const quarter = req.query.quarter;
+
+    if (!validateQuarter(quarter)) {
+      return res.status(400).json({ message: 'Quarter is required and must be Q1, Q2, Q3, or Q4.' });
+    }
+
+    const sheet = await getApprovedSheetForReport(req.params.employeeId, req.user.sub, quarter);
+
+    if (!sheet) {
+      return res.status(404).json({ message: 'Approved locked Goal Sheet not found for this reporting line.' });
+    }
+
+    const checkIn = await prisma.checkIn.findUnique({
+      where: {
+        userId_managerId_quarter: {
+          userId: sheet.ownerId,
+          managerId: Number(req.user.sub),
+          quarter
+        }
+      }
+    });
+
+    return res.json({
+      employee: sheet.owner,
+      goalSheet: sheet,
+      quarter,
+      goals: sheet.goals.map((goal) => mapProgressGoal(goal, quarter)),
+      checkIn: mapCheckIn(checkIn)
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/checkins/:employeeId', async (req, res, next) => {
+  try {
+    const quarter = req.body.quarter;
+    const comment = req.body.comment?.trim();
+
+    if (!validateQuarter(quarter)) {
+      return res.status(400).json({ message: 'Quarter is required and must be Q1, Q2, Q3, or Q4.' });
+    }
+    if (req.body.completed && !comment) {
+      return res.status(400).json({ message: 'Manager Check-in Comment is required before marking completed.' });
+    }
+
+    const sheet = await getApprovedSheetForReport(req.params.employeeId, req.user.sub, quarter);
+
+    if (!sheet) {
+      return res.status(404).json({ message: 'Approved locked Goal Sheet not found for this reporting line.' });
+    }
+
+    const existingCheckIn = await prisma.checkIn.findUnique({
+      where: {
+        userId_managerId_quarter: {
+          userId: sheet.ownerId,
+          managerId: Number(req.user.sub),
+          quarter
+        }
+      }
+    });
+
+    if (existingCheckIn?.status === 'COMPLETED') {
+      return res.status(409).json({ message: 'Completed check-ins are locked and cannot be edited.' });
+    }
+
+    const checkIn = await prisma.$transaction(async (tx) => {
+      const result = await tx.checkIn.upsert({
+        where: {
+          userId_managerId_quarter: {
+            userId: sheet.ownerId,
+            managerId: Number(req.user.sub),
+            quarter
+          }
+        },
+        update: {
+          comment: comment || null,
+          status: req.body.completed ? 'COMPLETED' : 'DRAFT',
+          completedAt: req.body.completed ? new Date() : null,
+          cycleId: sheet.cycleId
+        },
+        create: {
+          userId: sheet.ownerId,
+          managerId: Number(req.user.sub),
+          quarter,
+          comment: comment || null,
+          status: req.body.completed ? 'COMPLETED' : 'DRAFT',
+          completedAt: req.body.completed ? new Date() : null,
+          cycleId: sheet.cycleId
+        }
+      });
+
+      if (req.body.completed) {
+        await tx.auditLog.create({
+          data: {
+            actorId: Number(req.user.sub),
+            action: 'MANAGER_COMPLETED_QUARTERLY_CHECKIN',
+            entityType: 'CheckIn',
+            entityId: result.id,
+            details: {
+              employeeId: sheet.ownerId,
+              quarter
+            }
+          }
+        });
+      }
+
+      return result;
+    });
+
+    return res.json({ checkIn: mapCheckIn(checkIn) });
   } catch (error) {
     return next(error);
   }
