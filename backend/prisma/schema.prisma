@@ -8,53 +8,177 @@ datasource db {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  employeeId String?  @unique
-  name       String
-  email      String   @unique
-  role       UserRole @default(EMPLOYEE)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  employeeCode String?  @unique
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(EMPLOYEE)
+  managerId    Int?
+  manager      User?    @relation("ManagerReports", fields: [managerId], references: [id])
+  reports      User[]   @relation("ManagerReports")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  goalSheets GoalSheet[]
+  goals            Goal[]        @relation("GoalOwner")
+  managedGoals     Goal[]        @relation("GoalManager")
+  achievements     Achievement[]
+  checkIns         CheckIn[]
+  auditLogs        AuditLog[]
+  ownedSharedGoals SharedGoal[]  @relation("SharedGoalOwner")
+  sharedGoals      SharedGoal[]  @relation("SharedGoalMembers")
 }
 
-model GoalSheet {
-  id          Int             @id @default(autoincrement())
-  title       String
-  cycle       String
-  status      GoalSheetStatus @default(DRAFT)
-  ownerId     Int
-  owner       User            @relation(fields: [ownerId], references: [id])
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+model GoalCycle {
+  id        Int             @id @default(autoincrement())
+  name      String
+  quarter   String
+  year      Int
+  startDate DateTime
+  endDate   DateTime
+  status    GoalCycleStatus @default(DRAFT)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
-  goals Goal[]
+  goals       Goal[]
+  checkIns    CheckIn[]
+  sharedGoals SharedGoal[]
 }
 
 model Goal {
-  id             Int       @id @default(autoincrement())
-  goalSheetId    Int
-  goalSheet      GoalSheet @relation(fields: [goalSheetId], references: [id])
-  description    String
-  plannedMetric  String?
-  actualMetric   String?
-  completionRate Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                Int        @id @default(autoincrement())
+  title             String
+  description       String?
+  plannedMetric     String?
+  actualMetric      String?
+  plannedValue      Decimal?   @db.Decimal(10, 2)
+  actualValue       Decimal?   @db.Decimal(10, 2)
+  weight            Int        @default(0)
+  completionPercent Int        @default(0)
+  status            GoalStatus @default(DRAFT)
+  ownerId           Int
+  owner             User       @relation("GoalOwner", fields: [ownerId], references: [id])
+  managerId         Int?
+  manager           User?      @relation("GoalManager", fields: [managerId], references: [id])
+  cycleId           Int
+  cycle             GoalCycle  @relation(fields: [cycleId], references: [id])
+  sharedGoalId      Int?
+  sharedGoal        SharedGoal? @relation(fields: [sharedGoalId], references: [id])
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  achievements Achievement[]
+  checkIns     CheckIn[]
+
+  @@index([ownerId])
+  @@index([managerId])
+  @@index([cycleId])
+  @@index([sharedGoalId])
+}
+
+model Achievement {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  evidenceUrl String?
+  impact      String?
+  goalId      Int
+  goal        Goal     @relation(fields: [goalId], references: [id])
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([goalId])
+  @@index([userId])
+}
+
+model CheckIn {
+  id              Int           @id @default(autoincrement())
+  summary         String
+  blockers        String?
+  employeeComment String?
+  managerComment  String?
+  progressPercent Int           @default(0)
+  status          CheckInStatus @default(DRAFT)
+  goalId          Int
+  goal            Goal          @relation(fields: [goalId], references: [id])
+  userId          Int
+  user            User          @relation(fields: [userId], references: [id])
+  cycleId         Int
+  cycle           GoalCycle     @relation(fields: [cycleId], references: [id])
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([goalId])
+  @@index([userId])
+  @@index([cycleId])
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  actorId    Int?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  entityType String
+  entityId   Int?
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+}
+
+model SharedGoal {
+  id          Int              @id @default(autoincrement())
+  title       String
+  description String?
+  ownerId     Int
+  owner       User             @relation("SharedGoalOwner", fields: [ownerId], references: [id])
+  cycleId     Int
+  cycle       GoalCycle        @relation(fields: [cycleId], references: [id])
+  status      SharedGoalStatus @default(ACTIVE)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  goals   Goal[]
+  members User[] @relation("SharedGoalMembers")
+
+  @@index([ownerId])
+  @@index([cycleId])
 }
 
 enum UserRole {
   EMPLOYEE
   MANAGER
-  HR
   ADMIN
 }
 
-enum GoalSheetStatus {
+enum GoalCycleStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+}
+
+enum GoalStatus {
   DRAFT
   SUBMITTED
   L1_APPROVED
   REVISION_REQUESTED
+  IN_PROGRESS
+  COMPLETED
   CLOSED
+}
+
+enum CheckInStatus {
+  DRAFT
+  SUBMITTED
+  REVIEWED
+}
+
+enum SharedGoalStatus {
+  ACTIVE
+  ARCHIVED
 }
