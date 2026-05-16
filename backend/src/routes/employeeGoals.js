@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
+import { ensureActiveCycle } from './cycle.js';
 
 const router = express.Router();
 const editableStatuses = ['DRAFT', 'REVISION_REQUESTED'];
@@ -130,6 +131,17 @@ const requireEditableSheet = (sheet) => {
   return null;
 };
 
+const ensureGoalSettingPhase = async (res) => {
+  const cycle = await ensureActiveCycle();
+
+  if (cycle.activePhase !== 'GOAL_SETTING') {
+    res.status(409).json({ message: 'Goal setting is not active in the current phase.' });
+    return false;
+  }
+
+  return true;
+};
+
 router.use(requireAuth, requireRole('EMPLOYEE'));
 
 router.get('/goal-sheet', async (req, res, next) => {
@@ -148,6 +160,8 @@ router.get('/goal-sheet', async (req, res, next) => {
 
 router.post('/goals', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const sheet = await ensureCurrentGoalSheet(Number(req.user.sub));
     const sheetError = requireEditableSheet(sheet);
 
@@ -190,6 +204,8 @@ router.post('/goals', async (req, res, next) => {
 
 router.put('/goals/:id', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const sheet = await ensureCurrentGoalSheet(Number(req.user.sub));
     const sheetError = requireEditableSheet(sheet);
 
@@ -264,6 +280,8 @@ router.put('/goals/:id', async (req, res, next) => {
 
 router.delete('/goals/:id', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const sheet = await ensureCurrentGoalSheet(Number(req.user.sub));
     const sheetError = requireEditableSheet(sheet);
 
@@ -289,6 +307,8 @@ router.delete('/goals/:id', async (req, res, next) => {
 
 router.post('/goal-sheet/submit', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const sheet = await ensureCurrentGoalSheet(Number(req.user.sub));
     const sheetError = requireEditableSheet(sheet);
 

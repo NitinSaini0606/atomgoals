@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
+import { ensureActiveCycle } from './cycle.js';
 
 const router = express.Router();
 const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
@@ -72,6 +73,32 @@ const validateWeights = (goals) => {
   }
 
   return errors;
+};
+
+const ensureGoalSettingPhase = async (res) => {
+  const cycle = await ensureActiveCycle();
+
+  if (cycle.activePhase !== 'GOAL_SETTING') {
+    res.status(409).json({ message: 'Goal setting is not active in the current phase.' });
+    return false;
+  }
+
+  return true;
+};
+
+const ensureCheckInPhase = async (quarter, res) => {
+  const cycle = await ensureActiveCycle();
+
+  if (cycle.activePhase === 'GOAL_SETTING') {
+    res.status(409).json({ message: 'Quarterly check-ins are not active during goal setting.' });
+    return false;
+  }
+  if (cycle.activePhase !== quarter) {
+    res.status(409).json({ message: `Only ${cycle.activePhase} check-ins are active in the current phase.` });
+    return false;
+  }
+
+  return true;
 };
 
 const mapAchievement = (achievement) => achievement ? ({
@@ -219,6 +246,8 @@ router.put('/goal-sheets/:sheetId/goals/:goalId', async (req, res, next) => {
 
 router.post('/goal-sheets/:id/return', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const comment = req.body.comment?.trim();
 
     if (!comment) {
@@ -283,6 +312,8 @@ router.post('/goal-sheets/:id/return', async (req, res, next) => {
 
 router.post('/goal-sheets/:id/approve', async (req, res, next) => {
   try {
+    if (!await ensureGoalSettingPhase(res)) return;
+
     const sheet = await getSheetForManager(req.params.id, req.user.sub);
 
     if (!sheet) {
@@ -455,6 +486,7 @@ router.post('/checkins/:employeeId', async (req, res, next) => {
     if (req.body.completed && !comment) {
       return res.status(400).json({ message: 'Manager Check-in Comment is required before marking completed.' });
     }
+    if (req.body.completed && !await ensureCheckInPhase(quarter, res)) return;
 
     const sheet = await getApprovedSheetForReport(req.params.employeeId, req.user.sub, quarter);
 

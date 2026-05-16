@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
+import { ensureActiveCycle } from './cycle.js';
 
 const router = express.Router();
 const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
@@ -113,6 +114,21 @@ const validateAchievementPayload = (goal, body) => {
   return errors;
 };
 
+const ensureQuarterlyAchievementPhase = async (quarter, res) => {
+  const cycle = await ensureActiveCycle();
+
+  if (cycle.activePhase === 'GOAL_SETTING') {
+    res.status(409).json({ message: 'Quarterly achievement updates are not active during goal setting.' });
+    return false;
+  }
+  if (cycle.activePhase !== quarter) {
+    res.status(409).json({ message: `Only ${cycle.activePhase} achievement updates are active in the current phase.` });
+    return false;
+  }
+
+  return true;
+};
+
 const syncPrimaryOwnerAchievement = async (tx, sourceGoal, payload, scores, sourceAchievementId) => {
   if (!sourceGoal.sharedGoalId || sourceGoal.sharedGoal?.primaryOwnerId !== sourceGoal.ownerId) {
     return;
@@ -199,6 +215,8 @@ router.get('/achievements', async (req, res, next) => {
 
 router.post('/achievements', async (req, res, next) => {
   try {
+    if (!await ensureQuarterlyAchievementPhase(req.body.quarter, res)) return;
+
     const userId = Number(req.user.sub);
     const goal = await getEmployeeGoal(req.body.goalId, userId);
 
@@ -285,6 +303,8 @@ router.put('/achievements/:id', async (req, res, next) => {
     }
 
     const body = { ...req.body, quarter: req.body.quarter || existing.quarter };
+    if (!await ensureQuarterlyAchievementPhase(body.quarter, res)) return;
+
     const errors = validateAchievementPayload(existing.goal, body);
 
     if (errors.length > 0) {

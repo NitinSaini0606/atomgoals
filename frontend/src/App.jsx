@@ -301,7 +301,8 @@ function EmployeeGoalSheet({ session, activeCycle }) {
   }), [session.token]);
 
   const goals = goalSheet?.goals || [];
-  const isEditable = goalSheet && ['DRAFT', 'REVISION_REQUESTED'].includes(goalSheet.status);
+  const isGoalSettingActive = activeCycle?.activePhase === 'GOAL_SETTING';
+  const isEditable = goalSheet && ['DRAFT', 'REVISION_REQUESTED'].includes(goalSheet.status) && isGoalSettingActive;
   const isApprovedLocked = goalSheet?.status === 'APPROVED_LOCKED';
   const totalWeight = goals.reduce((sum, goal) => sum + Number(goal.weight), 0);
   const editingGoal = goals.find((goal) => goal.id === editingId);
@@ -480,6 +481,9 @@ function EmployeeGoalSheet({ session, activeCycle }) {
       {goalSheet?.status === 'REVISION_REQUESTED' && goalSheet.managerFeedback && (
         <Message tone="warning" messages={[`L1 Manager feedback: ${goalSheet.managerFeedback}`]} />
       )}
+      {!isGoalSettingActive && !isApprovedLocked && (
+        <Message tone="warning" messages={['Goal setting is not active in the current phase.']} />
+      )}
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
         <form onSubmit={saveGoal} className="rounded-lg border border-line bg-white p-5 shadow-subtle">
@@ -600,12 +604,12 @@ function EmployeeGoalSheet({ session, activeCycle }) {
         </div>
       </div>
 
-      {isApprovedLocked && <EmployeeAchievementTracking session={session} />}
+      {isApprovedLocked && <EmployeeAchievementTracking session={session} activeCycle={activeCycle} />}
     </section>
   );
 }
 
-function EmployeeAchievementTracking({ session }) {
+function EmployeeAchievementTracking({ session, activeCycle }) {
   const [quarter, setQuarter] = useState('Q1');
   const [goals, setGoals] = useState([]);
   const [forms, setForms] = useState({});
@@ -617,6 +621,8 @@ function EmployeeAchievementTracking({ session }) {
     Authorization: `Bearer ${session.token}`,
     'Content-Type': 'application/json'
   }), [session.token]);
+  const isQuarterlyPhaseActive = activeCycle?.activePhase && activeCycle.activePhase !== 'GOAL_SETTING';
+  const isSelectedQuarterActive = isQuarterlyPhaseActive && activeCycle.activePhase === quarter;
 
   const loadAchievements = async () => {
     setIsLoading(true);
@@ -708,6 +714,12 @@ function EmployeeAchievementTracking({ session }) {
       <div className="p-5">
         {notice && <Message tone="success" messages={[notice]} />}
         {errors.length > 0 && <Message tone="error" messages={errors} />}
+        {activeCycle?.activePhase === 'GOAL_SETTING' && (
+          <Message tone="warning" messages={['Quarterly achievement updates are not active during goal setting.']} />
+        )}
+        {isQuarterlyPhaseActive && !isSelectedQuarterActive && (
+          <Message tone="warning" messages={[`Only ${activeCycle.activePhase} achievement updates are active in the current phase.`]} />
+        )}
         {isLoading ? (
           <p className="text-sm text-muted">Loading Quarterly Updates...</p>
         ) : (
@@ -730,17 +742,18 @@ function EmployeeAchievementTracking({ session }) {
                 {goals.map((goal) => {
                   const form = forms[goal.id] || {};
                   const isSyncedSharedGoal = goal.sharedGoalId && goal.sharedGoal?.primaryOwner?.id !== session.user.id;
+                  const isReadOnly = isSyncedSharedGoal || !isSelectedQuarterActive;
                   return (
                     <tr key={goal.id}>
                       <td className="whitespace-normal break-words px-3 py-4 font-medium">{goal.title}</td>
                       <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.targetValue}</td>
                       <td className="px-3 py-4">
-                        <InlineInput disabled={isSyncedSharedGoal} value={form.actualValue || ''} onChange={(value) => updateForm(goal.id, { actualValue: value })} />
+                        <InlineInput disabled={isReadOnly} value={form.actualValue || ''} onChange={(value) => updateForm(goal.id, { actualValue: value })} />
                       </td>
                       <td className="px-3 py-4">
                         <select
                           value={form.status || 'NOT_STARTED'}
-                          disabled={isSyncedSharedGoal}
+                          disabled={isReadOnly}
                           onChange={(event) => updateForm(goal.id, { status: event.target.value })}
                           className="rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand disabled:bg-slate-50"
                         >
@@ -748,12 +761,12 @@ function EmployeeAchievementTracking({ session }) {
                         </select>
                       </td>
                       <td className="px-3 py-4">
-                        <InlineInput disabled={isSyncedSharedGoal} type="date" value={form.completionDate || ''} onChange={(value) => updateForm(goal.id, { completionDate: value })} />
+                        <InlineInput disabled={isReadOnly} type="date" value={form.completionDate || ''} onChange={(value) => updateForm(goal.id, { completionDate: value })} />
                       </td>
                       <td className="px-3 py-4">
                         <input
                           value={form.employeeNote || ''}
-                          disabled={isSyncedSharedGoal}
+                          disabled={isReadOnly}
                           onChange={(event) => updateForm(goal.id, { employeeNote: event.target.value })}
                           className="w-full rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand disabled:bg-slate-50"
                         />
@@ -762,7 +775,7 @@ function EmployeeAchievementTracking({ session }) {
                       <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.progressScore, '%')}</td>
                       <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.weightedScore)}</td>
                       <td className="px-3 py-4">
-                        <button disabled={isSyncedSharedGoal} onClick={() => saveAchievement(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                        <button disabled={isReadOnly} onClick={() => saveAchievement(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
                           Save
                         </button>
                       </td>
@@ -925,6 +938,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
   };
 
   const totalWeight = selectedSheet?.goals.reduce((sum, goal) => sum + Number(goal.weight), 0) || 0;
+  const isGoalSettingActive = activeCycle?.activePhase === 'GOAL_SETTING';
 
   return (
     <section className="mx-auto max-w-7xl px-6 py-10">
@@ -943,6 +957,9 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
 
       {notice && <Message tone="success" messages={[notice]} />}
       {errors.length > 0 && <Message tone="error" messages={errors} />}
+      {!isGoalSettingActive && (
+        <Message tone="warning" messages={['Goal setting is not active in the current phase.']} />
+      )}
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(280px,340px)_minmax(0,1fr)]">
         <aside className="min-w-0 rounded-lg border border-line bg-white shadow-subtle">
@@ -980,7 +997,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={approveAndLock} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+                  <button disabled={!isGoalSettingActive} onClick={approveAndLock} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark disabled:cursor-not-allowed disabled:opacity-50">
                     Approve & Lock
                   </button>
                 </div>
@@ -1048,7 +1065,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
                     placeholder="Explain what the employee should revise before resubmitting."
                   />
                 </label>
-                <button onClick={returnForRework} className="mt-3 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand">
+                <button disabled={!isGoalSettingActive} onClick={returnForRework} className="mt-3 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50">
                   Return for Rework
                 </button>
               </div>
@@ -1058,12 +1075,12 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
       </div>
 
       <SharedGoalsSection session={session} />
-      <ManagerCheckIns session={session} />
+      <ManagerCheckIns session={session} activeCycle={activeCycle} />
     </section>
   );
 }
 
-function ManagerCheckIns({ session }) {
+function ManagerCheckIns({ session, activeCycle }) {
   const [quarter, setQuarter] = useState('Q1');
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -1077,6 +1094,8 @@ function ManagerCheckIns({ session }) {
     Authorization: `Bearer ${session.token}`,
     'Content-Type': 'application/json'
   }), [session.token]);
+  const isQuarterlyPhaseActive = activeCycle?.activePhase && activeCycle.activePhase !== 'GOAL_SETTING';
+  const isSelectedQuarterActive = isQuarterlyPhaseActive && activeCycle.activePhase === quarter;
 
   const loadCheckIns = async () => {
     setIsLoading(true);
@@ -1191,6 +1210,12 @@ function ManagerCheckIns({ session }) {
         <div className="min-w-0">
           {notice && <Message tone="success" messages={[notice]} />}
           {errors.length > 0 && <Message tone="error" messages={errors} />}
+          {activeCycle?.activePhase === 'GOAL_SETTING' && (
+            <Message tone="warning" messages={['Quarterly check-ins are not active during goal setting.']} />
+          )}
+          {isQuarterlyPhaseActive && !isSelectedQuarterActive && (
+            <Message tone="warning" messages={[`Only ${activeCycle.activePhase} check-ins are active in the current phase.`]} />
+          )}
 
           {!progress ? (
             <p className="rounded-lg border border-line px-5 py-8 text-sm text-muted">Select a team member to open Quarterly Check-in progress.</p>
@@ -1235,9 +1260,9 @@ function ManagerCheckIns({ session }) {
 
               <label className="block text-sm font-semibold">
                 Manager Check-in Comment
-                {progress.checkIn?.status === 'COMPLETED' ? (
+                {progress.checkIn?.status === 'COMPLETED' || !isSelectedQuarterActive ? (
                   <div className="mt-2 min-h-20 rounded-md border border-line bg-slate-50 px-3 py-3 text-sm font-normal leading-6 text-ink">
-                    {progress.checkIn.comment}
+                    {progress.checkIn?.comment || '-'}
                   </div>
                 ) : (
                   <textarea
@@ -1248,7 +1273,7 @@ function ManagerCheckIns({ session }) {
                   />
                 )}
               </label>
-              {progress.checkIn?.status !== 'COMPLETED' && (
+              {progress.checkIn?.status !== 'COMPLETED' && isSelectedQuarterActive && (
                 <button onClick={completeCheckIn} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
                   Mark Check-in Completed
                 </button>
