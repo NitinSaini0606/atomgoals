@@ -100,6 +100,8 @@ const formatAuditDetails = (details) => {
     .join(', ');
 };
 
+const formatEscalationLabel = (value) => titleCase(String(value || '').replaceAll('_', ' '));
+
 function App() {
   const [email, setEmail] = useState('employee@atomgoals.com');
   const [password, setPassword] = useState('password123');
@@ -1488,6 +1490,7 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
   const [dashboard, setDashboard] = useState(null);
   const [completionRows, setCompletionRows] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [escalationData, setEscalationData] = useState({ note: '', escalations: [] });
   const [unlockReasonById, setUnlockReasonById] = useState({});
   const [errors, setErrors] = useState([]);
   const [notice, setNotice] = useState('');
@@ -1503,23 +1506,27 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
     setErrors([]);
 
     try {
-      const [dashboardResponse, completionResponse, auditResponse] = await Promise.all([
+      const [dashboardResponse, completionResponse, auditResponse, escalationResponse] = await Promise.all([
         fetch(`${API_BASE_URL}/admin/dashboard`, { headers: authHeaders }),
         fetch(`${API_BASE_URL}/admin/completion`, { headers: authHeaders }),
-        fetch(`${API_BASE_URL}/admin/audit-logs`, { headers: authHeaders })
+        fetch(`${API_BASE_URL}/admin/audit-logs`, { headers: authHeaders }),
+        fetch(`${API_BASE_URL}/admin/escalations`, { headers: authHeaders })
       ]);
 
       const dashboardData = await dashboardResponse.json();
       const completionData = await completionResponse.json();
       const auditData = await auditResponse.json();
+      const escalationJson = await escalationResponse.json();
 
       if (!dashboardResponse.ok) throw new Error(dashboardData.message || 'Could not load Admin Dashboard.');
       if (!completionResponse.ok) throw new Error(completionData.message || 'Could not load Completion Dashboard.');
       if (!auditResponse.ok) throw new Error(auditData.message || 'Could not load Audit Trail.');
+      if (!escalationResponse.ok) throw new Error(escalationJson.message || 'Could not load Escalation Monitor.');
 
       setDashboard(dashboardData);
       setCompletionRows(completionData.rows || []);
       setAuditLogs(auditData.auditLogs || []);
+      setEscalationData(escalationJson);
     } catch (loadError) {
       setErrors([loadError.message]);
     } finally {
@@ -1630,6 +1637,7 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
               loadAdminData();
             }}
           />
+          <AdminEscalationMonitor data={escalationData} />
           <AdminCompletionTable rows={completionRows} />
           <SharedGoalsSection session={session} />
           <AdminUnlockPanel
@@ -1707,6 +1715,64 @@ function AdminCyclePhase({ session, activeCycle, onChanged }) {
       </div>
       {notice && <div className="mt-4"><Message tone="success" messages={[notice]} /></div>}
       {errors.length > 0 && <div className="mt-4"><Message tone="error" messages={errors} /></div>}
+    </div>
+  );
+}
+
+function AdminEscalationMonitor({ data }) {
+  const rows = data?.escalations || [];
+
+  return (
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
+      <div className="flex flex-col justify-between gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center">
+        <div>
+          <h3 className="text-lg font-semibold">Escalation Monitor</h3>
+          <p className="mt-1 text-sm text-muted">
+            Pending Action view for goal submission, L1 Manager Approval, and Quarterly Check-in completion.
+          </p>
+          {data?.note && <p className="mt-2 text-sm font-medium text-muted">{data.note}</p>}
+        </div>
+        <span className="w-fit rounded-md border border-line bg-slate-50 px-3 py-2 text-sm font-semibold text-muted">
+          Open Items: {rows.length}
+        </span>
+      </div>
+      <div className="w-full max-w-full overflow-x-auto">
+        <table className="min-w-[1080px] table-fixed text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-muted">
+            <tr>
+              <th className="w-40 px-3 py-3 font-semibold">Employee Name</th>
+              <th className="w-40 px-3 py-3 font-semibold">Manager Name</th>
+              <th className="w-44 px-3 py-3 font-semibold">Issue Type</th>
+              <th className="w-32 px-3 py-3 font-semibold">Related Phase</th>
+              <th className="w-44 px-3 py-3 font-semibold">Pending Since</th>
+              <th className="w-40 px-3 py-3 font-semibold">Escalation Level</th>
+              <th className="w-44 px-3 py-3 font-semibold">Responsible Person</th>
+              <th className="w-28 px-3 py-3 font-semibold">Status</th>
+              <th className="w-72 px-3 py-3 font-semibold">Suggested Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.length === 0 && (
+              <tr><td className="px-3 py-5 text-muted" colSpan="9">No open escalations for the current active phase.</td></tr>
+            )}
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td className="whitespace-normal break-words px-3 py-4 font-medium">{row.employeeName}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{row.managerName || '-'}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{formatEscalationLabel(row.issueType)}</td>
+                <td className="px-3 py-4 text-muted">{formatPhase(row.relatedPhase)}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">
+                  {row.pendingSince ? new Date(row.pendingSince).toLocaleString() : row.pendingSinceLabel}
+                </td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{formatEscalationLabel(row.escalationLevel)}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{row.responsiblePerson}</td>
+                <td className="px-3 py-4 text-muted">{formatEscalationLabel(row.status)}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{row.suggestedAction}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

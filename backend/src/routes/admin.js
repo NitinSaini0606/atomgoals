@@ -7,6 +7,40 @@ const router = express.Router();
 const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
 const phases = ['GOAL_SETTING', 'Q1', 'Q2', 'Q3', 'Q4'];
 
+const getEscalationLevel = (pendingSince) => {
+  if (!pendingSince) return 'LEVEL_1_EMPLOYEE';
+
+  const ageMs = Date.now() - new Date(pendingSince).getTime();
+  const ageDays = Math.max(0, Math.floor(ageMs / (1000 * 60 * 60 * 24)));
+
+  if (ageDays <= 2) return 'LEVEL_1_EMPLOYEE';
+  if (ageDays <= 5) return 'LEVEL_2_MANAGER';
+  return 'LEVEL_3_HR';
+};
+
+const buildEscalation = ({ employee, manager, issueType, phase, pendingSince, suggestedAction }) => {
+  const level = getEscalationLevel(pendingSince);
+  const responsiblePerson = level === 'LEVEL_1_EMPLOYEE'
+    ? employee.name
+    : level === 'LEVEL_2_MANAGER'
+      ? manager?.name || 'Manager not assigned'
+      : 'HR / Admin';
+
+  return {
+    id: `${issueType}-${employee.id}-${phase}`,
+    employeeName: employee.name,
+    managerName: manager?.name || '',
+    issueType,
+    relatedPhase: phase,
+    pendingSince,
+    pendingSinceLabel: pendingSince ? new Date(pendingSince).toISOString() : 'Pending date unavailable',
+    escalationLevel: level,
+    responsiblePerson,
+    status: 'OPEN',
+    suggestedAction
+  };
+};
+
 const roundScore = (value) => {
   const number = Number(value || 0);
   return Number.isInteger(number) ? String(number) : String(Math.round(number * 100) / 100);
@@ -88,6 +122,78 @@ router.get('/dashboard', async (_req, res, next) => {
         cycleName: sheet.cycle.name,
         status: sheet.status
       }))
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/escalations', async (_req, res, next) => {
+  try {
+    const cycle = await ensureActiveCycle();
+    const employees = await prisma.user.findMany({
+      where: { role: 'EMPLOYEE', isActive: true },
+      include: {
+        manager: { select: { id: true, name: true, email: true } },
+        goalSheets: {
+          orderBy: { updatedAt: 'desc' },
+          take: 1,
+          include: { goals: true }
+        },
+        checkIns: true
+      },
+      orderBy: { name: 'asc' }
+    });
+
+    const escalations = [];
+
+    for (const employee of employees) {
+      const sheet = employee.goalSheets[0];
+
+      if (cycle.activePhase === 'GOAL_SETTING') {
+        if (!sheet || ['DRAFT', 'REVISION_REQUESTED'].includes(sheet.status)) {
+          escalations.push(buildEscalation({
+            employee,
+            manager: employee.manager,
+            issueType: 'GOAL_NOT_SUBMITTED',
+            phase: 'GOAL_SETTING',
+            pendingSince: sheet?.updatedAt || employee.createdAt,
+            suggestedAction: 'Ask employee to submit the Goal Sheet for L1 Manager Approval.'
+          }));
+        }
+
+        if (sheet?.status === 'SUBMITTED') {
+          escalations.push(buildEscalation({
+            employee,
+            manager: employee.manager,
+            issueType: 'MANAGER_APPROVAL_PENDING',
+            phase: 'GOAL_SETTING',
+            pendingSince: sheet.submittedAt || sheet.updatedAt,
+            suggestedAction: 'Ask L1 Manager to review, return, or approve and lock the Goal Sheet.'
+          }));
+        }
+      }
+
+      if (quarters.includes(cycle.activePhase) && sheet?.status === 'APPROVED_LOCKED') {
+        const checkIn = employee.checkIns.find((item) => item.quarter === cycle.activePhase);
+
+        if (checkIn?.status !== 'COMPLETED') {
+          escalations.push(buildEscalation({
+            employee,
+            manager: employee.manager,
+            issueType: 'CHECKIN_NOT_COMPLETED',
+            phase: cycle.activePhase,
+            pendingSince: checkIn?.updatedAt || sheet.approvedAt || sheet.updatedAt,
+            suggestedAction: `Ask manager to complete the ${cycle.activePhase} Quarterly Check-in.`
+          }));
+        }
+      }
+    }
+
+    return res.json({
+      activePhase: cycle.activePhase,
+      note: 'Dynamic escalation status is derived from current workflow state.',
+      escalations
     });
   } catch (error) {
     return next(error);
