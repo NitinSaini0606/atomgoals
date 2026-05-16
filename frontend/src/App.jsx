@@ -102,7 +102,7 @@ function App() {
       ) : session.user.role === 'MANAGER' ? (
         <ManagerApprovalDashboard session={session} />
       ) : (
-        <PlaceholderDashboard user={session.user} />
+        <AdminDashboard session={session} />
       )}
     </main>
   );
@@ -1126,16 +1126,263 @@ function ManagerCheckIns({ session }) {
   );
 }
 
-function PlaceholderDashboard({ user }) {
-  const title = 'Admin Dashboard';
-  const summary = 'Completion Dashboard and Audit Trail administration will be implemented in a later phase.';
+function AdminDashboard({ session }) {
+  const [dashboard, setDashboard] = useState(null);
+  const [completionRows, setCompletionRows] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [unlockReasonById, setUnlockReasonById] = useState({});
+  const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${session.token}`,
+    'Content-Type': 'application/json'
+  }), [session.token]);
+
+  const loadAdminData = async () => {
+    setIsLoading(true);
+    setErrors([]);
+
+    try {
+      const [dashboardResponse, completionResponse, auditResponse] = await Promise.all([
+        fetch(`${API_BASE_URL}/admin/dashboard`, { headers: authHeaders }),
+        fetch(`${API_BASE_URL}/admin/completion`, { headers: authHeaders }),
+        fetch(`${API_BASE_URL}/admin/audit-logs`, { headers: authHeaders })
+      ]);
+
+      const dashboardData = await dashboardResponse.json();
+      const completionData = await completionResponse.json();
+      const auditData = await auditResponse.json();
+
+      if (!dashboardResponse.ok) throw new Error(dashboardData.message || 'Could not load Admin Dashboard.');
+      if (!completionResponse.ok) throw new Error(completionData.message || 'Could not load Completion Dashboard.');
+      if (!auditResponse.ok) throw new Error(auditData.message || 'Could not load Audit Trail.');
+
+      setDashboard(dashboardData);
+      setCompletionRows(completionData.rows || []);
+      setAuditLogs(auditData.auditLogs || []);
+    } catch (loadError) {
+      setErrors([loadError.message]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAdminData();
+  }, []);
+
+  const unlockGoalSheet = async (sheetId) => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/goal-sheets/${sheetId}/unlock`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ reason: unlockReasonById[sheetId] || '' })
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not unlock Goal Sheet.');
+
+      setNotice('Goal Sheet unlocked and moved to Revision Requested.');
+      setUnlockReasonById({ ...unlockReasonById, [sheetId]: '' });
+      await loadAdminData();
+    } catch (unlockError) {
+      setErrors([unlockError.message]);
+    }
+  };
+
+  const downloadAchievementCsv = async () => {
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/reports/achievement.csv`, {
+        headers: { Authorization: `Bearer ${session.token}` }
+      });
+
+      if (!response.ok) throw new Error('Could not export Achievement Report.');
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'atomgoals-achievement-report.csv';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setErrors([exportError.message]);
+    }
+  };
+
+  const summaryCards = dashboard ? [
+    ['Total Employees', dashboard.summary.totalEmployees],
+    ['Total Managers', dashboard.summary.totalManagers],
+    ['Goal Sheets Draft', dashboard.summary.goalSheetsDraft],
+    ['Goal Sheets Submitted', dashboard.summary.goalSheetsSubmitted],
+    ['Returned for Rework', dashboard.summary.goalSheetsReturned],
+    ['Approved/Locked', dashboard.summary.goalSheetsApprovedLocked],
+    ['Q1 Check-ins', `${dashboard.summary.checkIns.Q1.completed} completed / ${dashboard.summary.checkIns.Q1.pending} pending`],
+    ['Q2 Check-ins', `${dashboard.summary.checkIns.Q2.completed} completed / ${dashboard.summary.checkIns.Q2.pending} pending`],
+    ['Q3 Check-ins', `${dashboard.summary.checkIns.Q3.completed} completed / ${dashboard.summary.checkIns.Q3.pending} pending`],
+    ['Q4 Check-ins', `${dashboard.summary.checkIns.Q4.completed} completed / ${dashboard.summary.checkIns.Q4.pending} pending`]
+  ] : [];
 
   return (
     <section className="mx-auto max-w-7xl px-6 py-10">
-      <span className="rounded-md border border-line bg-white px-3 py-1 text-sm font-medium text-muted">{user.role}</span>
-      <h2 className="mt-4 text-3xl font-semibold">{title}</h2>
-      <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">{summary}</p>
+      <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <span className="rounded-md border border-line bg-white px-3 py-1 text-sm font-medium text-muted">Admin Workspace</span>
+          <h2 className="mt-4 text-3xl font-semibold">Admin Dashboard</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+            Monitor Goal Sheet governance, Check-in Completion, Audit Trail activity, and Achievement Report exports.
+          </p>
+        </div>
+        <button onClick={downloadAchievementCsv} className="w-fit rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+          Export Achievement Report
+        </button>
+      </div>
+
+      {notice && <Message tone="success" messages={[notice]} />}
+      {errors.length > 0 && <Message tone="error" messages={errors} />}
+
+      {isLoading ? (
+        <p className="text-sm text-muted">Loading Admin Dashboard...</p>
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+            {summaryCards.map(([label, value]) => (
+              <article key={label} className="rounded-lg border border-line bg-white p-4 shadow-subtle">
+                <p className="text-sm font-semibold text-muted">{label}</p>
+                <p className="mt-3 text-2xl font-semibold">{value}</p>
+              </article>
+            ))}
+          </div>
+
+          <AdminCompletionTable rows={completionRows} />
+          <AdminUnlockPanel
+            sheets={dashboard.unlockableGoalSheets}
+            reasons={unlockReasonById}
+            setReasons={setUnlockReasonById}
+            onUnlock={unlockGoalSheet}
+          />
+          <AdminAuditTrail logs={auditLogs} />
+        </>
+      )}
     </section>
+  );
+}
+
+function AdminCompletionTable({ rows }) {
+  return (
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-lg font-semibold">Completion Dashboard</h3>
+        <p className="mt-1 text-sm text-muted">Employee-level Goal Sheet and Check-in Completion status.</p>
+      </div>
+      <div className="w-full max-w-full overflow-x-auto">
+        <table className="min-w-[980px] table-fixed text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-muted">
+            <tr>
+              <th className="w-44 px-3 py-3 font-semibold">Employee Name</th>
+              <th className="w-44 px-3 py-3 font-semibold">Manager Name</th>
+              <th className="w-40 px-3 py-3 font-semibold">Goal Sheet Status</th>
+              <th className="w-24 px-3 py-3 font-semibold">Total Goals</th>
+              <th className="w-28 px-3 py-3 font-semibold">Total Weightage</th>
+              <th className="w-28 px-3 py-3 font-semibold">Q1 Check-in</th>
+              <th className="w-28 px-3 py-3 font-semibold">Q2 Check-in</th>
+              <th className="w-28 px-3 py-3 font-semibold">Q3 Check-in</th>
+              <th className="w-28 px-3 py-3 font-semibold">Q4 Check-in</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {rows.map((row) => (
+              <tr key={row.employeeEmail}>
+                <td className="whitespace-normal break-words px-3 py-4 font-medium">{row.employeeName}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{row.managerName || '-'}</td>
+                <td className="px-3 py-4 text-muted">{row.goalSheetStatus}</td>
+                <td className="px-3 py-4 text-muted">{row.totalGoals}</td>
+                <td className="px-3 py-4 text-muted">{row.totalWeightage}%</td>
+                <td className="px-3 py-4 text-muted">{row.q1CheckInStatus}</td>
+                <td className="px-3 py-4 text-muted">{row.q2CheckInStatus}</td>
+                <td className="px-3 py-4 text-muted">{row.q3CheckInStatus}</td>
+                <td className="px-3 py-4 text-muted">{row.q4CheckInStatus}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AdminUnlockPanel({ sheets, reasons, setReasons, onUnlock }) {
+  return (
+    <div className="mt-8 rounded-lg border border-line bg-white shadow-subtle">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-lg font-semibold">Goal Unlock</h3>
+        <p className="mt-1 text-sm text-muted">Unlock approved Goal Sheets only when a governed revision is required.</p>
+      </div>
+      <div className="divide-y divide-line">
+        {sheets.length === 0 && <p className="px-5 py-5 text-sm text-muted">No approved locked Goal Sheets available for unlock.</p>}
+        {sheets.map((sheet) => (
+          <div key={sheet.id} className="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[1fr_360px_110px] lg:items-center">
+            <div className="min-w-0">
+              <p className="font-semibold">{sheet.employeeName}</p>
+              <p className="mt-1 text-sm text-muted">{sheet.employeeEmail} | Manager: {sheet.managerName || '-'}</p>
+            </div>
+            <input
+              value={reasons[sheet.id] || ''}
+              onChange={(event) => setReasons({ ...reasons, [sheet.id]: event.target.value })}
+              className="w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-brand"
+              placeholder="Reason for unlock"
+            />
+            <button onClick={() => onUnlock(sheet.id)} className="rounded-md border border-line px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand">
+              Unlock
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminAuditTrail({ logs }) {
+  return (
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-lg font-semibold">Audit Trail</h3>
+        <p className="mt-1 text-sm text-muted">Newest-first governance activity across goal sheets, achievements, and check-ins.</p>
+      </div>
+      <div className="w-full max-w-full overflow-x-auto">
+        <table className="min-w-[980px] table-fixed text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-muted">
+            <tr>
+              <th className="w-44 px-3 py-3 font-semibold">Timestamp</th>
+              <th className="w-44 px-3 py-3 font-semibold">Actor/User</th>
+              <th className="w-56 px-3 py-3 font-semibold">Action</th>
+              <th className="w-32 px-3 py-3 font-semibold">Entity Type</th>
+              <th className="w-24 px-3 py-3 font-semibold">Entity ID</th>
+              <th className="w-80 px-3 py-3 font-semibold">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {logs.map((log) => (
+              <tr key={log.id}>
+                <td className="px-3 py-4 text-muted">{new Date(log.createdAt).toLocaleString()}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{log.actor ? `${log.actor.name} (${log.actor.role})` : 'System'}</td>
+                <td className="whitespace-normal break-words px-3 py-4 font-medium">{log.action}</td>
+                <td className="px-3 py-4 text-muted">{log.entityType}</td>
+                <td className="px-3 py-4 text-muted">{log.entityId || '-'}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{log.details ? JSON.stringify(log.details) : '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
