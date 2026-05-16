@@ -24,7 +24,8 @@ const signToken = (user) => {
       sub: user.id,
       email: user.email,
       role: user.role,
-      name: user.name
+      name: user.name,
+      managerId: user.managerId
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '8h' }

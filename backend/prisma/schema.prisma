@@ -22,6 +22,7 @@ model User {
   updatedAt    DateTime @updatedAt
 
   goals            Goal[]        @relation("GoalOwner")
+  goalSheets       GoalSheet[]
   managedGoals     Goal[]        @relation("GoalManager")
   achievements     Achievement[]
   checkIns         CheckIn[]
@@ -42,14 +43,39 @@ model GoalCycle {
   updatedAt DateTime        @updatedAt
 
   goals       Goal[]
+  goalSheets  GoalSheet[]
   checkIns    CheckIn[]
   sharedGoals SharedGoal[]
+
+  @@unique([year, quarter])
+}
+
+model GoalSheet {
+  id        Int             @id @default(autoincrement())
+  ownerId   Int
+  owner     User            @relation(fields: [ownerId], references: [id])
+  cycleId   Int
+  cycle     GoalCycle       @relation(fields: [cycleId], references: [id])
+  status    GoalSheetStatus @default(DRAFT)
+  submittedAt DateTime?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  goals Goal[]
+
+  @@unique([ownerId, cycleId])
+  @@index([cycleId])
 }
 
 model Goal {
   id                Int        @id @default(autoincrement())
+  thrustArea        String
   title             String
   description       String?
+  uomType           UomType    @default(NUMERIC)
+  scoreDirection    ScoreDirection @default(MIN)
+  targetValue       String?
+  deadline          DateTime?
   plannedMetric     String?
   actualMetric      String?
   plannedValue      Decimal?   @db.Decimal(10, 2)
@@ -63,6 +89,8 @@ model Goal {
   manager           User?      @relation("GoalManager", fields: [managerId], references: [id])
   cycleId           Int
   cycle             GoalCycle  @relation(fields: [cycleId], references: [id])
+  goalSheetId       Int
+  goalSheet         GoalSheet  @relation(fields: [goalSheetId], references: [id])
   sharedGoalId      Int?
   sharedGoal        SharedGoal? @relation(fields: [sharedGoalId], references: [id])
   createdAt         DateTime   @default(now())
@@ -74,6 +102,7 @@ model Goal {
   @@index([ownerId])
   @@index([managerId])
   @@index([cycleId])
+  @@index([goalSheetId])
   @@index([sharedGoalId])
 }
 
@@ -170,6 +199,25 @@ enum GoalStatus {
   IN_PROGRESS
   COMPLETED
   CLOSED
+}
+
+enum GoalSheetStatus {
+  DRAFT
+  SUBMITTED
+  REVISION_REQUESTED
+}
+
+enum UomType {
+  NUMERIC
+  PERCENTAGE
+  TIMELINE
+  ZERO_BASED
+}
+
+enum ScoreDirection {
+  MIN
+  MAX
+  NONE
 }
 
 enum CheckInStatus {
