@@ -41,6 +41,7 @@ model GoalCycle {
   startDate DateTime
   endDate   DateTime
   status    GoalCycleStatus @default(DRAFT)
+  activePhase ActivePhase    @default(GOAL_SETTING)
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 
@@ -206,6 +207,14 @@ enum GoalCycleStatus {
   DRAFT
   ACTIVE
   CLOSED
+}
+
+enum ActivePhase {
+  GOAL_SETTING
+  Q1
+  Q2
+  Q3
+  Q4
 }
 
 enum GoalStatus {

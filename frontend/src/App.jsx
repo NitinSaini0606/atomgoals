@@ -20,6 +20,9 @@ const demoUsers = [
 ];
 
 const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+const activePhases = ['GOAL_SETTING', 'Q1', 'Q2', 'Q3', 'Q4'];
+
+const formatPhase = (phase) => phase === 'GOAL_SETTING' ? 'Goal Setting' : phase;
 
 const formatScore = (value, suffix = '') => {
   const numericValue = Number(value || 0);
@@ -47,7 +50,8 @@ const formatAuditAction = (action) => {
     SHARED_GOAL_CREATED_AND_ASSIGNED: 'Shared goal created and assigned',
     MANAGER_EDITED_GOAL_REVIEW_FIELDS: 'Manager edited goal review fields',
     MANAGER_RETURNED_GOAL_SHEET_FOR_REWORK: 'Manager returned goal sheet for rework',
-    EMPLOYEE_ADJUSTED_SHARED_GOAL_WEIGHTAGE: 'Employee adjusted shared goal weightage'
+    EMPLOYEE_ADJUSTED_SHARED_GOAL_WEIGHTAGE: 'Employee adjusted shared goal weightage',
+    ADMIN_CHANGED_ACTIVE_PHASE: 'Admin changed active phase'
   };
 
   return labels[action] || titleCase(String(action || '').replaceAll('_', ' '));
@@ -66,6 +70,8 @@ const formatAuditKey = (key) => {
     reason: 'Reason',
     oldStatus: 'Old Status',
     newStatus: 'New Status',
+    oldPhase: 'Old Phase',
+    newPhase: 'New Phase',
     oldWeight: 'Old Weight',
     newWeight: 'New Weight',
     primaryOwnerId: 'Primary Owner ID',
@@ -103,6 +109,31 @@ function App() {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [activeCycle, setActiveCycle] = useState(null);
+
+  const loadActiveCycle = async (token = session?.token) => {
+    if (!token) {
+      setActiveCycle(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/cycle/active`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await response.json();
+
+      if (response.ok) {
+        setActiveCycle(data.cycle);
+      }
+    } catch (_error) {
+      setActiveCycle(null);
+    }
+  };
+
+  useEffect(() => {
+    loadActiveCycle();
+  }, [session?.token]);
 
   const handleLogin = async (event) => {
     event.preventDefault();
@@ -123,6 +154,7 @@ function App() {
 
       localStorage.setItem('atomgoals-session', JSON.stringify(data));
       setSession(data);
+      await loadActiveCycle(data.token);
     } catch (loginError) {
       setError(loginError.message);
     } finally {
@@ -133,6 +165,7 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('atomgoals-session');
     setSession(null);
+    setActiveCycle(null);
   };
 
   return (
@@ -144,12 +177,19 @@ function App() {
             <h1 className="text-xl font-semibold">AtomGoals</h1>
           </div>
           {session && (
-            <button
-              onClick={handleLogout}
-              className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand"
-            >
-              Sign out
-            </button>
+            <div className="flex items-center gap-3">
+              {activeCycle && (
+                <span className="rounded-md border border-line bg-slate-50 px-3 py-2 text-sm font-semibold text-muted">
+                  Active Phase: {formatPhase(activeCycle.activePhase)}
+                </span>
+              )}
+              <button
+                onClick={handleLogout}
+                className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand"
+              >
+                Sign out
+              </button>
+            </div>
           )}
         </div>
       </header>
@@ -165,11 +205,11 @@ function App() {
           onSubmit={handleLogin}
         />
       ) : session.user.role === 'EMPLOYEE' ? (
-        <EmployeeGoalSheet session={session} />
+        <EmployeeGoalSheet session={session} activeCycle={activeCycle} />
       ) : session.user.role === 'MANAGER' ? (
-        <ManagerApprovalDashboard session={session} />
+        <ManagerApprovalDashboard session={session} activeCycle={activeCycle} />
       ) : (
-        <AdminDashboard session={session} />
+        <AdminDashboard session={session} activeCycle={activeCycle} onActiveCycleChange={setActiveCycle} />
       )}
     </main>
   );
@@ -246,7 +286,7 @@ function LoginPage({ email, password, error, isLoading, setEmail, setPassword, o
   );
 }
 
-function EmployeeGoalSheet({ session }) {
+function EmployeeGoalSheet({ session, activeCycle }) {
   const [goalSheet, setGoalSheet] = useState(null);
   const [form, setForm] = useState(emptyGoal);
   const [editingId, setEditingId] = useState(null);
@@ -420,6 +460,9 @@ function EmployeeGoalSheet({ session }) {
             Employee Workspace
           </span>
           <h2 className="mt-4 text-3xl font-semibold">Goal Sheet</h2>
+          {activeCycle && (
+            <p className="mt-2 text-sm font-semibold text-brand">Active Phase: {formatPhase(activeCycle.activePhase)}</p>
+          )}
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             Create up to 8 goals, keep each goal at 10% or above, and submit only when total weightage is exactly 100%.
           </p>
@@ -735,7 +778,7 @@ function EmployeeAchievementTracking({ session }) {
   );
 }
 
-function ManagerApprovalDashboard({ session }) {
+function ManagerApprovalDashboard({ session, activeCycle }) {
   const [goalSheets, setGoalSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState(null);
   const [editingGoalId, setEditingGoalId] = useState(null);
@@ -890,6 +933,9 @@ function ManagerApprovalDashboard({ session }) {
           Manager Workspace
         </span>
         <h2 className="mt-4 text-3xl font-semibold">L1 Manager Approval</h2>
+        {activeCycle && (
+          <p className="mt-2 text-sm font-semibold text-brand">Active Phase: {formatPhase(activeCycle.activePhase)}</p>
+        )}
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
           Review Submitted Goal Sheets from your direct reports. Adjust only Target Value, Deadline, and Weightage before returning or approving.
         </p>
@@ -1413,7 +1459,7 @@ function SharedGoalsSection({ session }) {
   );
 }
 
-function AdminDashboard({ session }) {
+function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
   const [dashboard, setDashboard] = useState(null);
   const [completionRows, setCompletionRows] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -1523,6 +1569,9 @@ function AdminDashboard({ session }) {
         <div>
           <span className="rounded-md border border-line bg-white px-3 py-1 text-sm font-medium text-muted">Admin Workspace</span>
           <h2 className="mt-4 text-3xl font-semibold">Admin Dashboard</h2>
+          {activeCycle && (
+            <p className="mt-2 text-sm font-semibold text-brand">Active Phase: {formatPhase(activeCycle.activePhase)}</p>
+          )}
           <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             Monitor Goal Sheet governance, Check-in Completion, Audit Trail activity, and Achievement Report exports.
           </p>
@@ -1548,6 +1597,14 @@ function AdminDashboard({ session }) {
             ))}
           </div>
 
+          <AdminCyclePhase
+            session={session}
+            activeCycle={activeCycle}
+            onChanged={(cycle) => {
+              onActiveCycleChange(cycle);
+              loadAdminData();
+            }}
+          />
           <AdminCompletionTable rows={completionRows} />
           <SharedGoalsSection session={session} />
           <AdminUnlockPanel
@@ -1560,6 +1617,72 @@ function AdminDashboard({ session }) {
         </>
       )}
     </section>
+  );
+}
+
+function AdminCyclePhase({ session, activeCycle, onChanged }) {
+  const [selectedPhase, setSelectedPhase] = useState(activeCycle?.activePhase || 'GOAL_SETTING');
+  const [notice, setNotice] = useState('');
+  const [errors, setErrors] = useState([]);
+
+  useEffect(() => {
+    if (activeCycle?.activePhase) {
+      setSelectedPhase(activeCycle.activePhase);
+    }
+  }, [activeCycle?.activePhase]);
+
+  const updatePhase = async () => {
+    setNotice('');
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/cycle/phase`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ activePhase: selectedPhase })
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not update active phase.');
+
+      setNotice('Active phase updated.');
+      onChanged(data.cycle);
+    } catch (error) {
+      setErrors([error.message]);
+    }
+  };
+
+  return (
+    <div className="mt-8 rounded-lg border border-line bg-white p-5 shadow-subtle">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <h3 className="text-lg font-semibold">Cycle & Phase Management</h3>
+          <p className="mt-1 text-sm text-muted">
+            Set the displayed active phase for the current cycle. This does not enforce workflow restrictions yet.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-sm font-semibold">
+            Active Phase
+            <select
+              value={selectedPhase}
+              onChange={(event) => setSelectedPhase(event.target.value)}
+              className="ml-3 rounded-md border border-line px-3 py-2 text-sm font-normal outline-none focus:border-brand"
+            >
+              {activePhases.map((phase) => <option key={phase} value={phase}>{formatPhase(phase)}</option>)}
+            </select>
+          </label>
+          <button onClick={updatePhase} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+            Update Phase
+          </button>
+        </div>
+      </div>
+      {notice && <div className="mt-4"><Message tone="success" messages={[notice]} /></div>}
+      {errors.length > 0 && <div className="mt-4"><Message tone="error" messages={errors} /></div>}
+    </div>
   );
 }
 

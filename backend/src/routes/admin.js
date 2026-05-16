@@ -1,9 +1,11 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { prisma } from '../prisma.js';
+import { ensureActiveCycle } from './cycle.js';
 
 const router = express.Router();
 const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+const phases = ['GOAL_SETTING', 'Q1', 'Q2', 'Q3', 'Q4'];
 
 const roundScore = (value) => {
   const number = Number(value || 0);
@@ -87,6 +89,47 @@ router.get('/dashboard', async (_req, res, next) => {
         status: sheet.status
       }))
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.put('/cycle/phase', async (req, res, next) => {
+  try {
+    const activePhase = req.body.activePhase;
+
+    if (!phases.includes(activePhase)) {
+      return res.status(400).json({ message: 'Active phase must be GOAL_SETTING, Q1, Q2, Q3, or Q4.' });
+    }
+
+    const cycle = await ensureActiveCycle();
+    const oldPhase = cycle.activePhase;
+
+    const updatedCycle = await prisma.$transaction(async (tx) => {
+      const result = await tx.goalCycle.update({
+        where: { id: cycle.id },
+        data: { activePhase }
+      });
+
+      if (oldPhase !== activePhase) {
+        await tx.auditLog.create({
+          data: {
+            actorId: Number(req.user.sub),
+            action: 'ADMIN_CHANGED_ACTIVE_PHASE',
+            entityType: 'GoalCycle',
+            entityId: cycle.id,
+            details: {
+              oldPhase,
+              newPhase: activePhase
+            }
+          }
+        });
+      }
+
+      return result;
+    });
+
+    return res.json({ cycle: updatedCycle });
   } catch (error) {
     return next(error);
   }
