@@ -91,6 +91,8 @@ function App() {
         />
       ) : session.user.role === 'EMPLOYEE' ? (
         <EmployeeGoalSheet session={session} />
+      ) : session.user.role === 'MANAGER' ? (
+        <ManagerApprovalDashboard session={session} />
       ) : (
         <PlaceholderDashboard user={session.user} />
       )}
@@ -185,6 +187,7 @@ function EmployeeGoalSheet({ session }) {
 
   const goals = goalSheet?.goals || [];
   const isEditable = goalSheet && ['DRAFT', 'REVISION_REQUESTED'].includes(goalSheet.status);
+  const isApprovedLocked = goalSheet?.status === 'APPROVED_LOCKED';
   const totalWeight = goals.reduce((sum, goal) => sum + Number(goal.weight), 0);
 
   const loadGoalSheet = async () => {
@@ -346,6 +349,12 @@ function EmployeeGoalSheet({ session }) {
 
       {notice && <Message tone="success" messages={[notice]} />}
       {errors.length > 0 && <Message tone="error" messages={errors} />}
+      {isApprovedLocked && (
+        <Message tone="success" messages={['Goal Sheet approved and locked by your L1 Manager.']} />
+      )}
+      {goalSheet?.status === 'REVISION_REQUESTED' && goalSheet.managerFeedback && (
+        <Message tone="warning" messages={[`L1 Manager feedback: ${goalSheet.managerFeedback}`]} />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[420px_1fr]">
         <form onSubmit={saveGoal} className="rounded-lg border border-line bg-white p-5 shadow-subtle">
@@ -407,13 +416,15 @@ function EmployeeGoalSheet({ session }) {
               <h3 className="text-lg font-semibold">Current Goals</h3>
               <p className="mt-1 text-sm text-muted">{goals.length}/8 goals added. Total weightage: {totalWeight}%.</p>
             </div>
-            <button
-              onClick={submitGoalSheet}
-              disabled={!isEditable}
-              className="w-fit rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Submit to L1 Manager
-            </button>
+            {!isApprovedLocked && (
+              <button
+                onClick={submitGoalSheet}
+                disabled={!isEditable}
+                className="w-fit rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Submit to L1 Manager
+              </button>
+            )}
           </div>
 
           <div className="overflow-x-auto">
@@ -457,11 +468,288 @@ function EmployeeGoalSheet({ session }) {
   );
 }
 
+function ManagerApprovalDashboard({ session }) {
+  const [goalSheets, setGoalSheets] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState(null);
+  const [editingGoalId, setEditingGoalId] = useState(null);
+  const [reviewForm, setReviewForm] = useState({ targetValue: '', deadline: '', weight: 10 });
+  const [returnComment, setReturnComment] = useState('');
+  const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${session.token}`,
+    'Content-Type': 'application/json'
+  }), [session.token]);
+
+  const loadSubmittedSheets = async () => {
+    setIsLoading(true);
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/goal-sheets`, {
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not load Submitted Goal Sheets.');
+
+      setGoalSheets(data.goalSheets);
+      if (selectedSheet) {
+        const refreshed = data.goalSheets.find((sheet) => sheet.id === selectedSheet.id);
+        setSelectedSheet(refreshed || null);
+      }
+    } catch (loadError) {
+      setErrors([loadError.message]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSubmittedSheets();
+  }, []);
+
+  const openSheet = async (sheetId) => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/goal-sheets/${sheetId}`, {
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not open Goal Sheet.');
+
+      setSelectedSheet(data.goalSheet);
+      setEditingGoalId(null);
+    } catch (openError) {
+      setErrors([openError.message]);
+    }
+  };
+
+  const startGoalEdit = (goal) => {
+    setEditingGoalId(goal.id);
+    setReviewForm({
+      targetValue: goal.targetValue || '',
+      deadline: goal.deadline || '',
+      weight: goal.weight
+    });
+    setErrors([]);
+    setNotice('');
+  };
+
+  const saveManagerEdit = async (goal) => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/goal-sheets/${selectedSheet.id}/goals/${goal.id}`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ ...reviewForm, weight: Number(reviewForm.weight) })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ErrorWithMessages(data.message || 'Could not update goal review fields.', data.errors);
+      }
+
+      const updatedGoals = selectedSheet.goals.map((item) => item.id === goal.id ? data.goal : item);
+      setSelectedSheet({ ...selectedSheet, goals: updatedGoals });
+      setEditingGoalId(null);
+      setNotice('Manager review fields updated.');
+    } catch (saveError) {
+      setErrors(saveError.messages || [saveError.message]);
+    }
+  };
+
+  const returnForRework = async () => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/goal-sheets/${selectedSheet.id}/return`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ comment: returnComment })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Could not return Goal Sheet for rework.');
+      }
+
+      setNotice('Goal Sheet returned for rework.');
+      setReturnComment('');
+      setSelectedSheet(null);
+      await loadSubmittedSheets();
+    } catch (returnError) {
+      setErrors([returnError.message]);
+    }
+  };
+
+  const approveAndLock = async () => {
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/manager/goal-sheets/${selectedSheet.id}/approve`, {
+        method: 'POST',
+        headers: authHeaders
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ErrorWithMessages(data.message || 'Could not approve Goal Sheet.', data.errors);
+      }
+
+      setNotice('Goal Sheet approved and locked.');
+      setSelectedSheet(data.goalSheet);
+      await loadSubmittedSheets();
+    } catch (approveError) {
+      setErrors(approveError.messages || [approveError.message]);
+    }
+  };
+
+  const totalWeight = selectedSheet?.goals.reduce((sum, goal) => sum + Number(goal.weight), 0) || 0;
+
+  return (
+    <section className="mx-auto max-w-7xl px-6 py-10">
+      <div className="mb-8">
+        <span className="rounded-md border border-line bg-white px-3 py-1 text-sm font-medium text-muted">
+          Manager Workspace
+        </span>
+        <h2 className="mt-4 text-3xl font-semibold">L1 Manager Approval</h2>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+          Review Submitted Goal Sheets from your direct reports. Adjust only Target Value, Deadline, and Weightage before returning or approving.
+        </p>
+      </div>
+
+      {notice && <Message tone="success" messages={[notice]} />}
+      {errors.length > 0 && <Message tone="error" messages={errors} />}
+
+      <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+        <aside className="rounded-lg border border-line bg-white shadow-subtle">
+          <div className="border-b border-line px-5 py-4">
+            <h3 className="text-lg font-semibold">Submitted Goal Sheets</h3>
+            <p className="mt-1 text-sm text-muted">{isLoading ? 'Loading...' : `${goalSheets.length} awaiting review`}</p>
+          </div>
+          <div className="divide-y divide-line">
+            {goalSheets.length === 0 && (
+              <p className="px-5 py-5 text-sm text-muted">No submitted Goal Sheets are waiting for L1 Manager Approval.</p>
+            )}
+            {goalSheets.map((sheet) => (
+              <button
+                key={sheet.id}
+                onClick={() => openSheet(sheet.id)}
+                className="block w-full px-5 py-4 text-left hover:bg-slate-50"
+              >
+                <span className="block text-sm font-semibold">{sheet.owner.name}</span>
+                <span className="mt-1 block text-sm text-muted">{sheet.cycle.name} - {sheet.goals.length} goals</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <div className="rounded-lg border border-line bg-white shadow-subtle">
+          {!selectedSheet ? (
+            <div className="px-5 py-8 text-sm text-muted">Select a Submitted Goal Sheet to review.</div>
+          ) : (
+            <>
+              <div className="flex flex-col justify-between gap-3 border-b border-line px-5 py-4 md:flex-row md:items-center">
+                <div>
+                  <h3 className="text-lg font-semibold">{selectedSheet.owner.name}</h3>
+                  <p className="mt-1 text-sm text-muted">
+                    Status: {selectedSheet.status} | Total weightage: {totalWeight}%
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={approveAndLock} className="rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+                    Approve & Lock
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[1080px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-muted">
+                    <tr>
+                      <th className="px-4 py-3 font-semibold">Thrust Area</th>
+                      <th className="px-4 py-3 font-semibold">Goal Title</th>
+                      <th className="px-4 py-3 font-semibold">Description</th>
+                      <th className="px-4 py-3 font-semibold">UoM Type</th>
+                      <th className="px-4 py-3 font-semibold">Target Value</th>
+                      <th className="px-4 py-3 font-semibold">Deadline</th>
+                      <th className="px-4 py-3 font-semibold">Weightage</th>
+                      <th className="px-4 py-3 font-semibold">Status</th>
+                      <th className="px-4 py-3 font-semibold">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {selectedSheet.goals.map((goal) => {
+                      const isEditing = editingGoalId === goal.id;
+
+                      return (
+                        <tr key={goal.id}>
+                          <td className="px-4 py-4 font-medium">{goal.thrustArea}</td>
+                          <td className="px-4 py-4">{goal.title}</td>
+                          <td className="px-4 py-4 text-muted">{goal.description}</td>
+                          <td className="px-4 py-4 text-muted">{goal.uomType}</td>
+                          <td className="px-4 py-4">
+                            {isEditing ? <InlineInput value={reviewForm.targetValue} onChange={(value) => setReviewForm({ ...reviewForm, targetValue: value })} /> : goal.targetValue}
+                          </td>
+                          <td className="px-4 py-4">
+                            {isEditing ? <InlineInput type="date" value={reviewForm.deadline} onChange={(value) => setReviewForm({ ...reviewForm, deadline: value })} /> : goal.deadline || '-'}
+                          </td>
+                          <td className="px-4 py-4">
+                            {isEditing ? <InlineInput type="number" value={reviewForm.weight} onChange={(value) => setReviewForm({ ...reviewForm, weight: value })} /> : `${goal.weight}%`}
+                          </td>
+                          <td className="px-4 py-4 text-muted">{goal.status}</td>
+                          <td className="px-4 py-4">
+                            {isEditing ? (
+                              <div className="flex gap-2">
+                                <button onClick={() => saveManagerEdit(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white">Save</button>
+                                <button onClick={() => setEditingGoalId(null)} className="rounded-md border border-line px-3 py-1.5 font-semibold">Cancel</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => startGoalEdit(goal)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:border-brand hover:text-brand">Edit</button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="border-t border-line p-5">
+                <label className="block text-sm font-semibold">
+                  Return for Rework Comment
+                  <textarea
+                    value={returnComment}
+                    onChange={(event) => setReturnComment(event.target.value)}
+                    className="mt-2 min-h-20 w-full rounded-md border border-line px-3 py-3 text-sm font-normal outline-none focus:border-brand"
+                    placeholder="Explain what the employee should revise before resubmitting."
+                  />
+                </label>
+                <button onClick={returnForRework} className="mt-3 rounded-md border border-line px-4 py-2 text-sm font-semibold hover:border-brand hover:text-brand">
+                  Return for Rework
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PlaceholderDashboard({ user }) {
-  const title = user.role === 'MANAGER' ? 'Manager Dashboard' : 'Admin Dashboard';
-  const summary = user.role === 'MANAGER'
-    ? 'L1 Manager Approval will be implemented in the next phase.'
-    : 'Completion Dashboard and Audit Trail administration will be implemented in a later phase.';
+  const title = 'Admin Dashboard';
+  const summary = 'Completion Dashboard and Audit Trail administration will be implemented in a later phase.';
 
   return (
     <section className="mx-auto max-w-7xl px-6 py-10">
@@ -487,6 +775,17 @@ function Field({ label, type = 'text', value, disabled, onChange }) {
   );
 }
 
+function InlineInput({ type = 'text', value, onChange }) {
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-32 rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+    />
+  );
+}
+
 function SelectField({ label, value, disabled, options, onChange }) {
   return (
     <label className="block text-sm font-semibold">
@@ -506,6 +805,8 @@ function SelectField({ label, value, disabled, options, onChange }) {
 function Message({ tone, messages }) {
   const classes = tone === 'success'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : tone === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
     : 'border-red-200 bg-red-50 text-red-700';
 
   return (

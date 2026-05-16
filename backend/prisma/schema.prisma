@@ -51,15 +51,18 @@ model GoalCycle {
 }
 
 model GoalSheet {
-  id        Int             @id @default(autoincrement())
-  ownerId   Int
-  owner     User            @relation(fields: [ownerId], references: [id])
-  cycleId   Int
-  cycle     GoalCycle       @relation(fields: [cycleId], references: [id])
-  status    GoalSheetStatus @default(DRAFT)
-  submittedAt DateTime?
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
+  id              Int             @id @default(autoincrement())
+  ownerId         Int
+  owner           User            @relation(fields: [ownerId], references: [id])
+  cycleId         Int
+  cycle           GoalCycle       @relation(fields: [cycleId], references: [id])
+  status          GoalSheetStatus @default(DRAFT)
+  managerFeedback String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  approvedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
 
   goals Goal[]
 
@@ -196,6 +199,7 @@ enum GoalStatus {
   SUBMITTED
   L1_APPROVED
   REVISION_REQUESTED
+  APPROVED_LOCKED
   IN_PROGRESS
   COMPLETED
   CLOSED
@@ -205,6 +209,7 @@ enum GoalSheetStatus {
   DRAFT
   SUBMITTED
   REVISION_REQUESTED
+  APPROVED_LOCKED
 }
 
 enum UomType {
