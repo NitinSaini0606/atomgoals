@@ -6,6 +6,7 @@ import authRouter from './routes/auth.js';
 import employeeAchievementsRouter from './routes/employeeAchievements.js';
 import employeeGoalsRouter from './routes/employeeGoals.js';
 import managerGoalsRouter from './routes/managerGoals.js';
+import sharedGoalsRouter from './routes/sharedGoals.js';
 
 dotenv.config();
 
@@ -21,6 +22,7 @@ app.use('/admin', adminRouter);
 app.use('/employee', employeeGoalsRouter);
 app.use('/employee', employeeAchievementsRouter);
 app.use('/manager', managerGoalsRouter);
+app.use('/shared-goals', sharedGoalsRouter);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({

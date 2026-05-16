@@ -52,7 +52,16 @@ const ensureCurrentGoalSheet = async (userId) => {
     },
     include: {
       cycle: true,
-      goals: { orderBy: { createdAt: 'asc' } }
+      goals: {
+        orderBy: { createdAt: 'asc' },
+        include: {
+          sharedGoal: {
+            include: {
+              primaryOwner: { select: { id: true, name: true, email: true } }
+            }
+          }
+        }
+      }
     }
   });
 };
@@ -194,6 +203,39 @@ router.put('/goals/:id', async (req, res, next) => {
       return res.status(404).json({ message: 'Goal not found on your current Goal Sheet.' });
     }
 
+    if (existingGoal.sharedGoalId) {
+      const weight = Number(req.body.weight);
+
+      if (!Number.isInteger(weight) || weight < 10 || weight > 100) {
+        return res.status(400).json({ message: 'Shared Goal weightage must be between 10% and 100%.' });
+      }
+
+      const goal = await prisma.$transaction(async (tx) => {
+        const result = await tx.goal.update({
+          where: { id: existingGoal.id },
+          data: { weight }
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorId: Number(req.user.sub),
+            action: 'EMPLOYEE_ADJUSTED_SHARED_GOAL_WEIGHTAGE',
+            entityType: 'Goal',
+            entityId: existingGoal.id,
+            details: {
+              sharedGoalId: existingGoal.sharedGoalId,
+              oldWeight: existingGoal.weight,
+              newWeight: weight
+            }
+          }
+        });
+
+        return result;
+      });
+
+      return res.json({ goal: mapGoal(goal) });
+    }
+
     const errors = validateGoalPayload(req.body);
 
     if (errors.length > 0) {
@@ -233,6 +275,9 @@ router.delete('/goals/:id', async (req, res, next) => {
 
     if (!existingGoal) {
       return res.status(404).json({ message: 'Goal not found on your current Goal Sheet.' });
+    }
+    if (existingGoal.sharedGoalId) {
+      return res.status(409).json({ message: 'Shared Goals cannot be deleted from the employee Goal Sheet.' });
     }
 
     await prisma.goal.delete({ where: { id: existingGoal.id } });
@@ -277,7 +322,16 @@ router.post('/goal-sheet/submit', async (req, res, next) => {
         data: { status: 'SUBMITTED', submittedAt: new Date() },
         include: {
           cycle: true,
-          goals: { orderBy: { createdAt: 'asc' } }
+          goals: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              sharedGoal: {
+                include: {
+                  primaryOwner: { select: { id: true, name: true, email: true } }
+                }
+              }
+            }
+          }
         }
       });
     });

@@ -45,6 +45,25 @@ async function main() {
   });
 
   await prisma.user.upsert({
+    where: { email: 'employee2@atomgoals.com' },
+    update: {
+      name: 'AtomGoals Employee Two',
+      passwordHash,
+      role: UserRole.EMPLOYEE,
+      managerId: manager.id,
+      isActive: true
+    },
+    create: {
+      employeeCode: 'EMP-002',
+      name: 'AtomGoals Employee Two',
+      email: 'employee2@atomgoals.com',
+      passwordHash,
+      role: UserRole.EMPLOYEE,
+      managerId: manager.id
+    }
+  });
+
+  await prisma.user.upsert({
     where: { email: 'admin@atomgoals.com' },
     update: {
       name: 'AtomGoals Admin',

@@ -29,6 +29,7 @@ model User {
   managerCheckIns  CheckIn[]      @relation("ManagerCheckIns")
   auditLogs        AuditLog[]
   ownedSharedGoals SharedGoal[]  @relation("SharedGoalOwner")
+  primarySharedGoals SharedGoal[] @relation("SharedGoalPrimaryOwner")
   sharedGoals      SharedGoal[]  @relation("SharedGoalMembers")
 }
 
@@ -170,10 +171,17 @@ model AuditLog {
 
 model SharedGoal {
   id          Int              @id @default(autoincrement())
+  thrustArea  String
   title       String
   description String?
+  uomType     UomType
+  scoreDirection ScoreDirection
+  targetValue String
+  deadline    DateTime?
   ownerId     Int
   owner       User             @relation("SharedGoalOwner", fields: [ownerId], references: [id])
+  primaryOwnerId Int
+  primaryOwner   User          @relation("SharedGoalPrimaryOwner", fields: [primaryOwnerId], references: [id])
   cycleId     Int
   cycle       GoalCycle        @relation(fields: [cycleId], references: [id])
   status      SharedGoalStatus @default(ACTIVE)
@@ -184,6 +192,7 @@ model SharedGoal {
   members User[] @relation("SharedGoalMembers")
 
   @@index([ownerId])
+  @@index([primaryOwnerId])
   @@index([cycleId])
 }
 

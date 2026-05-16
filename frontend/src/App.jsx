@@ -27,6 +27,73 @@ const formatScore = (value, suffix = '') => {
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(2)}${suffix}`;
 };
 
+const titleCase = (value) => value
+  .toLowerCase()
+  .split(' ')
+  .filter(Boolean)
+  .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+  .join(' ');
+
+const formatAuditAction = (action) => {
+  const labels = {
+    MANAGER_COMPLETED_QUARTERLY_CHECKIN: 'Manager completed quarterly check-in',
+    PRIMARY_OWNER_ACHIEVEMENT_SYNCED: 'Primary owner achievement synced',
+    EMPLOYEE_SAVED_QUARTERLY_ACHIEVEMENT: 'Employee saved quarterly achievement',
+    MANAGER_APPROVED_AND_LOCKED_GOAL_SHEET: 'Manager approved and locked goal sheet',
+    GOAL_SHEET_SUBMITTED: 'Goal sheet submitted',
+    ADMIN_UNLOCKED_GOAL_SHEET: 'Admin unlocked goal sheet',
+    SHARED_GOAL_CREATED: 'Shared goal created',
+    SHARED_GOAL_ASSIGNED: 'Shared goal assigned',
+    SHARED_GOAL_CREATED_AND_ASSIGNED: 'Shared goal created and assigned',
+    MANAGER_EDITED_GOAL_REVIEW_FIELDS: 'Manager edited goal review fields',
+    MANAGER_RETURNED_GOAL_SHEET_FOR_REWORK: 'Manager returned goal sheet for rework',
+    EMPLOYEE_ADJUSTED_SHARED_GOAL_WEIGHTAGE: 'Employee adjusted shared goal weightage'
+  };
+
+  return labels[action] || titleCase(String(action || '').replaceAll('_', ' '));
+};
+
+const formatAuditKey = (key) => {
+  const labels = {
+    id: 'ID',
+    employeeId: 'Employee ID',
+    goalId: 'Goal ID',
+    goalSheetId: 'Goal Sheet ID',
+    sharedGoalId: 'Shared Goal ID',
+    quarter: 'Quarter',
+    progressScore: 'Progress Score',
+    weightedScore: 'Weighted Score',
+    reason: 'Reason',
+    oldStatus: 'Old Status',
+    newStatus: 'New Status',
+    oldWeight: 'Old Weight',
+    newWeight: 'New Weight',
+    primaryOwnerId: 'Primary Owner ID',
+    assignedEmployeeIds: 'Assigned Employee IDs',
+    syncedGoalCount: 'Synced Goal Count',
+    editedFields: 'Edited Fields',
+    comment: 'Comment'
+  };
+
+  return labels[key] || titleCase(key.replace(/([A-Z])/g, ' $1'));
+};
+
+const formatAuditValue = (key, value) => {
+  if (Array.isArray(value)) return value.join(', ');
+  if (value && typeof value === 'object') return formatAuditDetails(value);
+  if (key === 'progressScore') return formatScore(value, '%');
+  if (key === 'weightedScore') return formatScore(value);
+  return String(value);
+};
+
+const formatAuditDetails = (details) => {
+  if (!details || Object.keys(details).length === 0) return '-';
+
+  return Object.entries(details)
+    .map(([key, value]) => `${formatAuditKey(key)}: ${formatAuditValue(key, value)}`)
+    .join(', ');
+};
+
 function App() {
   const [email, setEmail] = useState('employee@atomgoals.com');
   const [password, setPassword] = useState('password123');
@@ -197,6 +264,8 @@ function EmployeeGoalSheet({ session }) {
   const isEditable = goalSheet && ['DRAFT', 'REVISION_REQUESTED'].includes(goalSheet.status);
   const isApprovedLocked = goalSheet?.status === 'APPROVED_LOCKED';
   const totalWeight = goals.reduce((sum, goal) => sum + Number(goal.weight), 0);
+  const editingGoal = goals.find((goal) => goal.id === editingId);
+  const isEditingSharedGoal = Boolean(editingGoal?.sharedGoalId);
 
   const loadGoalSheet = async () => {
     setIsLoading(true);
@@ -223,6 +292,11 @@ function EmployeeGoalSheet({ session }) {
 
   const validateForm = () => {
     const nextErrors = [];
+
+    if (isEditingSharedGoal) {
+      if (Number(form.weight) < 10) nextErrors.push('Shared Goal weightage must be at least 10%.');
+      return nextErrors;
+    }
 
     if (!form.thrustArea.trim()) nextErrors.push('Thrust Area is required.');
     if (!form.title.trim()) nextErrors.push('Goal Title is required.');
@@ -373,27 +447,30 @@ function EmployeeGoalSheet({ session }) {
             </p>
           </div>
 
-          <Field label="Thrust Area" value={form.thrustArea} disabled={!isEditable} onChange={(value) => setForm({ ...form, thrustArea: value })} />
-          <Field label="Goal Title" value={form.title} disabled={!isEditable} onChange={(value) => setForm({ ...form, title: value })} />
+          {isEditingSharedGoal && (
+            <Message tone="warning" messages={['Shared Goal fields are read-only. You can adjust Weightage only.']} />
+          )}
+          <Field label="Thrust Area" value={form.thrustArea} disabled={!isEditable || isEditingSharedGoal} onChange={(value) => setForm({ ...form, thrustArea: value })} />
+          <Field label="Goal Title" value={form.title} disabled={!isEditable || isEditingSharedGoal} onChange={(value) => setForm({ ...form, title: value })} />
           <label className="mt-4 block text-sm font-semibold">Goal Description</label>
           <textarea
             value={form.description}
-            disabled={!isEditable}
+            disabled={!isEditable || isEditingSharedGoal}
             onChange={(event) => setForm({ ...form, description: event.target.value })}
             className="mt-2 min-h-24 w-full rounded-md border border-line px-3 py-3 text-sm outline-none focus:border-brand disabled:bg-slate-50"
           />
 
           <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <SelectField label="UoM Type" value={form.uomType} disabled={!isEditable} options={['NUMERIC', 'PERCENTAGE', 'TIMELINE', 'ZERO_BASED']} onChange={(value) => setForm({ ...form, uomType: value, scoreDirection: ['TIMELINE', 'ZERO_BASED'].includes(value) ? 'NONE' : form.scoreDirection })} />
-            <SelectField label="Score Direction" value={form.scoreDirection} disabled={!isEditable} options={['MIN', 'MAX', 'NONE']} onChange={(value) => setForm({ ...form, scoreDirection: value })} />
+            <SelectField label="UoM Type" value={form.uomType} disabled={!isEditable || isEditingSharedGoal} options={['NUMERIC', 'PERCENTAGE', 'TIMELINE', 'ZERO_BASED']} onChange={(value) => setForm({ ...form, uomType: value, scoreDirection: ['TIMELINE', 'ZERO_BASED'].includes(value) ? 'NONE' : form.scoreDirection })} />
+            <SelectField label="Score Direction" value={form.scoreDirection} disabled={!isEditable || isEditingSharedGoal} options={['MIN', 'MAX', 'NONE']} onChange={(value) => setForm({ ...form, scoreDirection: value })} />
           </div>
 
           <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <Field label="Target Value" value={form.targetValue} disabled={!isEditable} onChange={(value) => setForm({ ...form, targetValue: value })} />
+            <Field label="Target Value" value={form.targetValue} disabled={!isEditable || isEditingSharedGoal} onChange={(value) => setForm({ ...form, targetValue: value })} />
             <Field label="Weightage" type="number" value={form.weight} disabled={!isEditable} onChange={(value) => setForm({ ...form, weight: value })} />
           </div>
 
-          <Field label="Deadline for Timeline Goals" type="date" value={form.deadline} disabled={!isEditable} onChange={(value) => setForm({ ...form, deadline: value })} />
+          <Field label="Deadline for Timeline Goals" type="date" value={form.deadline} disabled={!isEditable || isEditingSharedGoal} onChange={(value) => setForm({ ...form, deadline: value })} />
 
           <div className="mt-5 flex flex-wrap gap-3">
             <button
@@ -454,7 +531,14 @@ function EmployeeGoalSheet({ session }) {
                 ) : goals.map((goal) => (
                   <tr key={goal.id}>
                     <td className="px-4 py-4 font-medium">{goal.thrustArea}</td>
-                    <td className="px-4 py-4">{goal.title}</td>
+                    <td className="px-4 py-4">
+                      <span className="font-medium">{goal.title}</span>
+                      {goal.sharedGoalId && (
+                        <span className="mt-1 block w-fit rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-muted">
+                          Shared Goal
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-4 text-muted">{goal.uomType}</td>
                     <td className="px-4 py-4 text-muted">{goal.targetValue}</td>
                     <td className="px-4 py-4 text-muted">{goal.deadline || '-'}</td>
@@ -462,7 +546,7 @@ function EmployeeGoalSheet({ session }) {
                     <td className="px-4 py-4">
                       <div className="flex gap-2">
                         <button disabled={!isEditable} onClick={() => editGoal(goal)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:border-brand hover:text-brand disabled:opacity-50">Edit</button>
-                        <button disabled={!isEditable} onClick={() => deleteGoal(goal.id)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:border-red-500 hover:text-red-700 disabled:opacity-50">Delete</button>
+                        <button disabled={!isEditable || Boolean(goal.sharedGoalId)} onClick={() => deleteGoal(goal.id)} className="rounded-md border border-line px-3 py-1.5 font-semibold hover:border-red-500 hover:text-red-700 disabled:opacity-50">Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -602,36 +686,40 @@ function EmployeeAchievementTracking({ session }) {
               <tbody className="divide-y divide-line">
                 {goals.map((goal) => {
                   const form = forms[goal.id] || {};
+                  const isSyncedSharedGoal = goal.sharedGoalId && goal.sharedGoal?.primaryOwner?.id !== session.user.id;
                   return (
                     <tr key={goal.id}>
                       <td className="whitespace-normal break-words px-3 py-4 font-medium">{goal.title}</td>
                       <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.targetValue}</td>
                       <td className="px-3 py-4">
-                        <InlineInput value={form.actualValue || ''} onChange={(value) => updateForm(goal.id, { actualValue: value })} />
+                        <InlineInput disabled={isSyncedSharedGoal} value={form.actualValue || ''} onChange={(value) => updateForm(goal.id, { actualValue: value })} />
                       </td>
                       <td className="px-3 py-4">
                         <select
                           value={form.status || 'NOT_STARTED'}
+                          disabled={isSyncedSharedGoal}
                           onChange={(event) => updateForm(goal.id, { status: event.target.value })}
-                          className="rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+                          className="rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand disabled:bg-slate-50"
                         >
                           {['NOT_STARTED', 'ON_TRACK', 'COMPLETED'].map((item) => <option key={item} value={item}>{item}</option>)}
                         </select>
                       </td>
                       <td className="px-3 py-4">
-                        <InlineInput type="date" value={form.completionDate || ''} onChange={(value) => updateForm(goal.id, { completionDate: value })} />
+                        <InlineInput disabled={isSyncedSharedGoal} type="date" value={form.completionDate || ''} onChange={(value) => updateForm(goal.id, { completionDate: value })} />
                       </td>
                       <td className="px-3 py-4">
                         <input
                           value={form.employeeNote || ''}
+                          disabled={isSyncedSharedGoal}
                           onChange={(event) => updateForm(goal.id, { employeeNote: event.target.value })}
-                          className="w-full rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+                          className="w-full rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand disabled:bg-slate-50"
                         />
+                        {isSyncedSharedGoal && <span className="mt-1 block text-xs text-muted">Synced from Primary Owner</span>}
                       </td>
                       <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.progressScore, '%')}</td>
                       <td className="px-3 py-4 text-muted">{formatScore(goal.achievement?.weightedScore)}</td>
                       <td className="px-3 py-4">
-                        <button onClick={() => saveAchievement(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white">
+                        <button disabled={isSyncedSharedGoal} onClick={() => saveAchievement(goal)} className="rounded-md bg-brand px-3 py-1.5 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
                           Save
                         </button>
                       </td>
@@ -923,6 +1011,7 @@ function ManagerApprovalDashboard({ session }) {
         </div>
       </div>
 
+      <SharedGoalsSection session={session} />
       <ManagerCheckIns session={session} />
     </section>
   );
@@ -1126,6 +1215,204 @@ function ManagerCheckIns({ session }) {
   );
 }
 
+function SharedGoalsSection({ session }) {
+  const [sharedGoals, setSharedGoals] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [form, setForm] = useState({
+    thrustArea: '',
+    title: '',
+    description: '',
+    uomType: 'NUMERIC',
+    scoreDirection: 'MIN',
+    targetValue: '',
+    deadline: '',
+    primaryOwnerId: '',
+    assignedEmployeeIds: []
+  });
+  const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState('');
+
+  const authHeaders = useMemo(() => ({
+    Authorization: `Bearer ${session.token}`,
+    'Content-Type': 'application/json'
+  }), [session.token]);
+
+  const loadSharedGoals = async () => {
+    setErrors([]);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/shared-goals`, { headers: authHeaders });
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.message || 'Could not load Shared Goals.');
+
+      setSharedGoals(data.sharedGoals || []);
+      setEmployees(data.assignableEmployees || []);
+    } catch (loadError) {
+      setErrors([loadError.message]);
+    }
+  };
+
+  useEffect(() => {
+    loadSharedGoals();
+  }, []);
+
+  const toggleEmployee = (employeeId) => {
+    const nextIds = form.assignedEmployeeIds.includes(employeeId)
+      ? form.assignedEmployeeIds.filter((id) => id !== employeeId)
+      : [...form.assignedEmployeeIds, employeeId];
+
+    setForm({
+      ...form,
+      assignedEmployeeIds: nextIds,
+      primaryOwnerId: nextIds.includes(Number(form.primaryOwnerId)) ? form.primaryOwnerId : ''
+    });
+  };
+
+  const createSharedGoal = async (event) => {
+    event.preventDefault();
+    setErrors([]);
+    setNotice('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/shared-goals`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          ...form,
+          primaryOwnerId: Number(form.primaryOwnerId),
+          assignedEmployeeIds: form.assignedEmployeeIds
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new ErrorWithMessages(data.message || 'Could not create Shared Goal.', data.errors);
+      }
+
+      setNotice('Shared Goal created and assigned.');
+      setForm({
+        thrustArea: '',
+        title: '',
+        description: '',
+        uomType: 'NUMERIC',
+        scoreDirection: 'MIN',
+        targetValue: '',
+        deadline: '',
+        primaryOwnerId: '',
+        assignedEmployeeIds: []
+      });
+      await loadSharedGoals();
+    } catch (createError) {
+      setErrors(createError.messages || [createError.message]);
+    }
+  };
+
+  const selectedEmployees = employees.filter((employee) => form.assignedEmployeeIds.includes(employee.id));
+
+  return (
+    <div className="mt-8 rounded-lg border border-line bg-white shadow-subtle">
+      <div className="border-b border-line px-5 py-4">
+        <h3 className="text-lg font-semibold">Shared Goals</h3>
+        <p className="mt-1 text-sm text-muted">Create Departmental KPIs with a Primary Owner and assigned employees.</p>
+      </div>
+      <div className="grid min-w-0 gap-6 p-5 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+        <form onSubmit={createSharedGoal} className="min-w-0">
+          {notice && <Message tone="success" messages={[notice]} />}
+          {errors.length > 0 && <Message tone="error" messages={errors} />}
+          <Field label="Thrust Area" value={form.thrustArea} onChange={(value) => setForm({ ...form, thrustArea: value })} />
+          <Field label="Goal Title" value={form.title} onChange={(value) => setForm({ ...form, title: value })} />
+          <label className="mt-4 block text-sm font-semibold">
+            Goal Description
+            <textarea
+              value={form.description}
+              onChange={(event) => setForm({ ...form, description: event.target.value })}
+              className="mt-2 min-h-20 w-full rounded-md border border-line px-3 py-3 text-sm font-normal outline-none focus:border-brand"
+            />
+          </label>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <SelectField label="UoM Type" value={form.uomType} options={['NUMERIC', 'PERCENTAGE', 'TIMELINE', 'ZERO_BASED']} onChange={(value) => setForm({ ...form, uomType: value, scoreDirection: ['TIMELINE', 'ZERO_BASED'].includes(value) ? 'NONE' : form.scoreDirection })} />
+            <SelectField label="Score Direction" value={form.scoreDirection} options={['MIN', 'MAX', 'NONE']} onChange={(value) => setForm({ ...form, scoreDirection: value })} />
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <Field label="Target Value" value={form.targetValue} onChange={(value) => setForm({ ...form, targetValue: value })} />
+            <Field label="Deadline if Timeline-Based" type="date" value={form.deadline} onChange={(value) => setForm({ ...form, deadline: value })} />
+          </div>
+          <label className="mt-4 block text-sm font-semibold">
+            Primary Owner
+            <select
+              value={form.primaryOwnerId}
+              onChange={(event) => setForm({ ...form, primaryOwnerId: event.target.value })}
+              className="mt-2 w-full rounded-md border border-line px-3 py-3 text-sm font-normal outline-none focus:border-brand"
+            >
+              <option value="">Select Primary Owner</option>
+              {selectedEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+            </select>
+          </label>
+          <div className="mt-4">
+            <p className="text-sm font-semibold">Assigned Employees</p>
+            <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-line">
+              {employees.map((employee) => (
+                <label key={employee.id} className="flex items-center gap-2 border-b border-line px-3 py-2 text-sm last:border-b-0">
+                  <input
+                    type="checkbox"
+                    checked={form.assignedEmployeeIds.includes(employee.id)}
+                    onChange={() => toggleEmployee(employee.id)}
+                  />
+                  <span>{employee.name}</span>
+                  <span className="text-muted">{employee.email}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <button type="submit" className="mt-5 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brandDark">
+            Create Shared Goal
+          </button>
+        </form>
+
+        <div className="min-w-0 overflow-hidden rounded-lg border border-line">
+          <div className="border-b border-line px-4 py-3">
+            <h4 className="font-semibold">Departmental KPI Register</h4>
+          </div>
+          <div className="w-full max-w-full overflow-x-auto">
+            <table className="min-w-[720px] table-fixed text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-muted">
+                <tr>
+                  <th className="w-44 px-3 py-3 font-semibold">Shared Goal</th>
+                  <th className="w-36 px-3 py-3 font-semibold">Primary Owner</th>
+                  <th className="w-36 px-3 py-3 font-semibold">Read-only Target</th>
+                  <th className="w-48 px-3 py-3 font-semibold">Assigned Employees</th>
+                  <th className="w-28 px-3 py-3 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {sharedGoals.length === 0 && <tr><td className="px-3 py-5 text-muted" colSpan="5">No Shared Goals created yet.</td></tr>}
+                {sharedGoals.map((goal) => (
+                  <tr key={goal.id}>
+                    <td className="whitespace-normal break-words px-3 py-4 font-medium">{goal.title}</td>
+                    <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.primaryOwner?.name || '-'}</td>
+                    <td className="whitespace-normal break-words px-3 py-4 text-muted">{goal.targetValue} ({goal.uomType})</td>
+                    <td className="whitespace-normal break-words px-3 py-4 text-muted">
+                      <div className="flex flex-wrap gap-1">
+                        {goal.members.map((member) => (
+                          <span key={member.id} className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-muted">
+                            {member.name}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-4 text-muted">{goal.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminDashboard({ session }) {
   const [dashboard, setDashboard] = useState(null);
   const [completionRows, setCompletionRows] = useState([]);
@@ -1262,6 +1549,7 @@ function AdminDashboard({ session }) {
           </div>
 
           <AdminCompletionTable rows={completionRows} />
+          <SharedGoalsSection session={session} />
           <AdminUnlockPanel
             sheets={dashboard.unlockableGoalSheets}
             reasons={unlockReasonById}
@@ -1283,12 +1571,12 @@ function AdminCompletionTable({ rows }) {
         <p className="mt-1 text-sm text-muted">Employee-level Goal Sheet and Check-in Completion status.</p>
       </div>
       <div className="w-full max-w-full overflow-x-auto">
-        <table className="min-w-[980px] table-fixed text-left text-sm">
+        <table className="min-w-[900px] table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-muted">
             <tr>
-              <th className="w-44 px-3 py-3 font-semibold">Employee Name</th>
-              <th className="w-44 px-3 py-3 font-semibold">Manager Name</th>
-              <th className="w-40 px-3 py-3 font-semibold">Goal Sheet Status</th>
+              <th className="w-40 px-3 py-3 font-semibold">Employee Name</th>
+              <th className="w-40 px-3 py-3 font-semibold">Manager Name</th>
+              <th className="w-36 px-3 py-3 font-semibold">Goal Sheet Status</th>
               <th className="w-24 px-3 py-3 font-semibold">Total Goals</th>
               <th className="w-28 px-3 py-3 font-semibold">Total Weightage</th>
               <th className="w-28 px-3 py-3 font-semibold">Q1 Check-in</th>
@@ -1320,7 +1608,7 @@ function AdminCompletionTable({ rows }) {
 
 function AdminUnlockPanel({ sheets, reasons, setReasons, onUnlock }) {
   return (
-    <div className="mt-8 rounded-lg border border-line bg-white shadow-subtle">
+    <div className="mt-8 max-w-full overflow-hidden rounded-lg border border-line bg-white shadow-subtle">
       <div className="border-b border-line px-5 py-4">
         <h3 className="text-lg font-semibold">Goal Unlock</h3>
         <p className="mt-1 text-sm text-muted">Unlock approved Goal Sheets only when a governed revision is required.</p>
@@ -1328,10 +1616,10 @@ function AdminUnlockPanel({ sheets, reasons, setReasons, onUnlock }) {
       <div className="divide-y divide-line">
         {sheets.length === 0 && <p className="px-5 py-5 text-sm text-muted">No approved locked Goal Sheets available for unlock.</p>}
         {sheets.map((sheet) => (
-          <div key={sheet.id} className="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[1fr_360px_110px] lg:items-center">
+          <div key={sheet.id} className="grid min-w-0 gap-3 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_minmax(240px,360px)_110px] lg:items-center">
             <div className="min-w-0">
-              <p className="font-semibold">{sheet.employeeName}</p>
-              <p className="mt-1 text-sm text-muted">{sheet.employeeEmail} | Manager: {sheet.managerName || '-'}</p>
+              <p className="break-words font-semibold">{sheet.employeeName}</p>
+              <p className="mt-1 break-words text-sm text-muted">{sheet.employeeEmail} | Manager: {sheet.managerName || '-'}</p>
             </div>
             <input
               value={reasons[sheet.id] || ''}
@@ -1357,15 +1645,15 @@ function AdminAuditTrail({ logs }) {
         <p className="mt-1 text-sm text-muted">Newest-first governance activity across goal sheets, achievements, and check-ins.</p>
       </div>
       <div className="w-full max-w-full overflow-x-auto">
-        <table className="min-w-[980px] table-fixed text-left text-sm">
+        <table className="min-w-[900px] table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-muted">
             <tr>
-              <th className="w-44 px-3 py-3 font-semibold">Timestamp</th>
-              <th className="w-44 px-3 py-3 font-semibold">Actor/User</th>
-              <th className="w-56 px-3 py-3 font-semibold">Action</th>
+              <th className="w-40 px-3 py-3 font-semibold">Timestamp</th>
+              <th className="w-40 px-3 py-3 font-semibold">Actor/User</th>
+              <th className="w-48 px-3 py-3 font-semibold">Action</th>
               <th className="w-32 px-3 py-3 font-semibold">Entity Type</th>
               <th className="w-24 px-3 py-3 font-semibold">Entity ID</th>
-              <th className="w-80 px-3 py-3 font-semibold">Details</th>
+              <th className="w-64 px-3 py-3 font-semibold">Details</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -1373,10 +1661,10 @@ function AdminAuditTrail({ logs }) {
               <tr key={log.id}>
                 <td className="px-3 py-4 text-muted">{new Date(log.createdAt).toLocaleString()}</td>
                 <td className="whitespace-normal break-words px-3 py-4 text-muted">{log.actor ? `${log.actor.name} (${log.actor.role})` : 'System'}</td>
-                <td className="whitespace-normal break-words px-3 py-4 font-medium">{log.action}</td>
+                <td className="whitespace-normal break-words px-3 py-4 font-medium">{formatAuditAction(log.action)}</td>
                 <td className="px-3 py-4 text-muted">{log.entityType}</td>
                 <td className="px-3 py-4 text-muted">{log.entityId || '-'}</td>
-                <td className="whitespace-normal break-words px-3 py-4 text-muted">{log.details ? JSON.stringify(log.details) : '-'}</td>
+                <td className="whitespace-normal break-words px-3 py-4 text-muted">{formatAuditDetails(log.details)}</td>
               </tr>
             ))}
           </tbody>
@@ -1401,13 +1689,14 @@ function Field({ label, type = 'text', value, disabled, onChange }) {
   );
 }
 
-function InlineInput({ type = 'text', value, onChange }) {
+function InlineInput({ type = 'text', value, disabled = false, onChange }) {
   return (
     <input
       type={type}
       value={value}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
-      className="w-32 rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand"
+      className="w-32 rounded-md border border-line px-2 py-2 text-sm outline-none focus:border-brand disabled:bg-slate-50"
     />
   );
 }

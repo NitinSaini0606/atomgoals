@@ -31,7 +31,14 @@ const getApprovedGoalSheet = async (userId) => {
       cycle: true,
       goals: {
         orderBy: { createdAt: 'asc' },
-        include: { achievements: true }
+        include: {
+          achievements: true,
+          sharedGoal: {
+            include: {
+              primaryOwner: { select: { id: true, name: true, email: true } }
+            }
+          }
+        }
       }
     },
     orderBy: { approvedAt: 'desc' }
@@ -45,7 +52,7 @@ const getEmployeeGoal = async (goalId, userId) => {
       ownerId: userId,
       goalSheet: { status: 'APPROVED_LOCKED' }
     },
-    include: { goalSheet: true }
+    include: { goalSheet: true, sharedGoal: true }
   });
 };
 
@@ -106,6 +113,65 @@ const validateAchievementPayload = (goal, body) => {
   return errors;
 };
 
+const syncPrimaryOwnerAchievement = async (tx, sourceGoal, payload, scores, sourceAchievementId) => {
+  if (!sourceGoal.sharedGoalId || sourceGoal.sharedGoal?.primaryOwnerId !== sourceGoal.ownerId) {
+    return;
+  }
+
+  const linkedGoals = await tx.goal.findMany({
+    where: {
+      sharedGoalId: sourceGoal.sharedGoalId,
+      id: { not: sourceGoal.id }
+    },
+    include: {
+      goalSheet: true,
+      sharedGoal: true
+    }
+  });
+
+  for (const linkedGoal of linkedGoals) {
+    const linkedScores = {
+      progressScore: scores.progressScore,
+      weightedScore: Number(((scores.progressScore * Number(linkedGoal.weight)) / 100).toFixed(2))
+    };
+
+    await tx.achievement.upsert({
+      where: { goalId_quarter: { goalId: linkedGoal.id, quarter: payload.quarter } },
+      update: {
+        actualValue: String(payload.actualValue ?? '').trim() || null,
+        status: payload.status,
+        completionDate: payload.completionDate ? new Date(payload.completionDate) : null,
+        employeeNote: payload.employeeNote?.trim() || null,
+        ...linkedScores
+      },
+      create: {
+        goalId: linkedGoal.id,
+        userId: linkedGoal.ownerId,
+        quarter: payload.quarter,
+        actualValue: String(payload.actualValue ?? '').trim() || null,
+        status: payload.status,
+        completionDate: payload.completionDate ? new Date(payload.completionDate) : null,
+        employeeNote: payload.employeeNote?.trim() || null,
+        ...linkedScores
+      }
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      actorId: sourceGoal.ownerId,
+      action: 'PRIMARY_OWNER_ACHIEVEMENT_SYNCED',
+      entityType: 'Achievement',
+      entityId: sourceAchievementId,
+      details: {
+        sharedGoalId: sourceGoal.sharedGoalId,
+        syncedGoalCount: linkedGoals.length,
+        quarter: payload.quarter
+      }
+    }
+  });
+};
+
 router.use(requireAuth, requireRole('EMPLOYEE'));
 
 router.get('/achievements', async (req, res, next) => {
@@ -138,6 +204,9 @@ router.post('/achievements', async (req, res, next) => {
 
     if (!goal) {
       return res.status(404).json({ message: 'Locked goal not found for your approved Goal Sheet.' });
+    }
+    if (goal.sharedGoalId && goal.sharedGoal.primaryOwnerId !== userId) {
+      return res.status(403).json({ message: 'Only the Primary Owner can update achievement for this Shared Goal.' });
     }
 
     const errors = validateAchievementPayload(goal, req.body);
@@ -185,6 +254,8 @@ router.post('/achievements', async (req, res, next) => {
         }
       });
 
+      await syncPrimaryOwnerAchievement(tx, goal, req.body, scores, result.id);
+
       return result;
     });
 
@@ -203,11 +274,14 @@ router.put('/achievements/:id', async (req, res, next) => {
         userId,
         goal: { goalSheet: { status: 'APPROVED_LOCKED' } }
       },
-      include: { goal: true }
+      include: { goal: { include: { sharedGoal: true } } }
     });
 
     if (!existing) {
       return res.status(404).json({ message: 'Quarterly achievement not found for your locked Goal Sheet.' });
+    }
+    if (existing.goal.sharedGoalId && existing.goal.sharedGoal.primaryOwnerId !== userId) {
+      return res.status(403).json({ message: 'Only the Primary Owner can update achievement for this Shared Goal.' });
     }
 
     const body = { ...req.body, quarter: req.body.quarter || existing.quarter };
@@ -245,6 +319,8 @@ router.put('/achievements/:id', async (req, res, next) => {
           }
         }
       });
+
+      await syncPrimaryOwnerAchievement(tx, existing.goal, body, scores, result.id);
 
       return result;
     });
