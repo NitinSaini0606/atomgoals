@@ -102,6 +102,15 @@ const formatAuditDetails = (details) => {
 
 const formatEscalationLabel = (value) => titleCase(String(value || '').replaceAll('_', ' '));
 
+const handleUnauthorized = (response, onUnauthorized) => {
+  if (response.status === 401) {
+    onUnauthorized?.();
+    return true;
+  }
+
+  return false;
+};
+
 function App() {
   const [email, setEmail] = useState('employee@atomgoals.com');
   const [password, setPassword] = useState('password123');
@@ -123,6 +132,13 @@ function App() {
       const response = await fetch(`${API_BASE_URL}/cycle/active`, {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (response.status === 401) {
+        localStorage.removeItem('atomgoals-session');
+        setSession(null);
+        setActiveCycle(null);
+        setError('Session expired. Please login again.');
+        return;
+      }
       const data = await response.json();
 
       if (response.ok) {
@@ -170,6 +186,13 @@ function App() {
     setActiveCycle(null);
   };
 
+  const handleSessionExpired = () => {
+    localStorage.removeItem('atomgoals-session');
+    setSession(null);
+    setActiveCycle(null);
+    setError('Session expired. Please login again.');
+  };
+
   return (
     <main className="min-h-screen bg-paper text-ink">
       <header className="border-b border-line bg-white">
@@ -207,11 +230,11 @@ function App() {
           onSubmit={handleLogin}
         />
       ) : session.user.role === 'EMPLOYEE' ? (
-        <EmployeeGoalSheet session={session} activeCycle={activeCycle} />
+        <EmployeeGoalSheet session={session} activeCycle={activeCycle} onUnauthorized={handleSessionExpired} />
       ) : session.user.role === 'MANAGER' ? (
-        <ManagerApprovalDashboard session={session} activeCycle={activeCycle} />
+        <ManagerApprovalDashboard session={session} activeCycle={activeCycle} onUnauthorized={handleSessionExpired} />
       ) : (
-        <AdminDashboard session={session} activeCycle={activeCycle} onActiveCycleChange={setActiveCycle} />
+        <AdminDashboard session={session} activeCycle={activeCycle} onActiveCycleChange={setActiveCycle} onUnauthorized={handleSessionExpired} />
       )}
     </main>
   );
@@ -288,7 +311,7 @@ function LoginPage({ email, password, error, isLoading, setEmail, setPassword, o
   );
 }
 
-function EmployeeGoalSheet({ session, activeCycle }) {
+function EmployeeGoalSheet({ session, activeCycle, onUnauthorized }) {
   const [goalSheet, setGoalSheet] = useState(null);
   const [form, setForm] = useState(emptyGoal);
   const [editingId, setEditingId] = useState(null);
@@ -318,6 +341,7 @@ function EmployeeGoalSheet({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/employee/goal-sheet`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not load Goal Sheet.');
@@ -374,6 +398,7 @@ function EmployeeGoalSheet({ session, activeCycle }) {
           body: JSON.stringify({ ...form, weight: Number(form.weight) })
         }
       );
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = response.status === 204 ? {} : await response.json();
 
       if (!response.ok) {
@@ -416,6 +441,7 @@ function EmployeeGoalSheet({ session, activeCycle }) {
         method: 'DELETE',
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
 
       if (!response.ok) {
         const data = await response.json();
@@ -438,6 +464,7 @@ function EmployeeGoalSheet({ session, activeCycle }) {
         method: 'POST',
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) {
@@ -606,12 +633,12 @@ function EmployeeGoalSheet({ session, activeCycle }) {
         </div>
       </div>
 
-      {isApprovedLocked && <EmployeeAchievementTracking session={session} activeCycle={activeCycle} />}
+      {isApprovedLocked && <EmployeeAchievementTracking session={session} activeCycle={activeCycle} onUnauthorized={onUnauthorized} />}
     </section>
   );
 }
 
-function EmployeeAchievementTracking({ session, activeCycle }) {
+function EmployeeAchievementTracking({ session, activeCycle, onUnauthorized }) {
   const [quarter, setQuarter] = useState('Q1');
   const [goals, setGoals] = useState([]);
   const [forms, setForms] = useState({});
@@ -634,6 +661,7 @@ function EmployeeAchievementTracking({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/employee/achievements?quarter=${quarter}`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not load Quarterly Updates.');
@@ -681,6 +709,7 @@ function EmployeeAchievementTracking({ session, activeCycle }) {
         headers: authHeaders,
         body: JSON.stringify(payload)
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) {
@@ -793,7 +822,7 @@ function EmployeeAchievementTracking({ session, activeCycle }) {
   );
 }
 
-function ManagerApprovalDashboard({ session, activeCycle }) {
+function ManagerApprovalDashboard({ session, activeCycle, onUnauthorized }) {
   const [goalSheets, setGoalSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState(null);
   const [editingGoalId, setEditingGoalId] = useState(null);
@@ -816,6 +845,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/manager/goal-sheets`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not load Submitted Goal Sheets.');
@@ -844,6 +874,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/manager/goal-sheets/${sheetId}`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not open Goal Sheet.');
@@ -876,6 +907,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
         headers: authHeaders,
         body: JSON.stringify({ ...reviewForm, weight: Number(reviewForm.weight) })
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) {
@@ -901,6 +933,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
         headers: authHeaders,
         body: JSON.stringify({ comment: returnComment })
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) {
@@ -925,6 +958,7 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
         method: 'POST',
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) {
@@ -1076,13 +1110,13 @@ function ManagerApprovalDashboard({ session, activeCycle }) {
         </div>
       </div>
 
-      <SharedGoalsSection session={session} />
-      <ManagerCheckIns session={session} activeCycle={activeCycle} />
+      <SharedGoalsSection session={session} onUnauthorized={onUnauthorized} />
+      <ManagerCheckIns session={session} activeCycle={activeCycle} onUnauthorized={onUnauthorized} />
     </section>
   );
 }
 
-function ManagerCheckIns({ session, activeCycle }) {
+function ManagerCheckIns({ session, activeCycle, onUnauthorized }) {
   const [quarter, setQuarter] = useState('Q1');
   const [employees, setEmployees] = useState([]);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -1107,6 +1141,7 @@ function ManagerCheckIns({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/manager/checkins?quarter=${quarter}`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not load Quarterly Check-ins.');
@@ -1133,6 +1168,7 @@ function ManagerCheckIns({ session, activeCycle }) {
       const response = await fetch(`${API_BASE_URL}/manager/checkins/${employeeId}?quarter=${quarter}`, {
         headers: authHeaders
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not open employee progress.');
@@ -1155,6 +1191,7 @@ function ManagerCheckIns({ session, activeCycle }) {
         headers: authHeaders,
         body: JSON.stringify({ quarter, comment, completed: true })
       });
+      if (handleUnauthorized(response, onUnauthorized)) return;
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not complete Quarterly Check-in.');
@@ -1288,7 +1325,7 @@ function ManagerCheckIns({ session, activeCycle }) {
   );
 }
 
-function SharedGoalsSection({ session }) {
+function SharedGoalsSection({ session, onUnauthorized }) {
   const [sharedGoals, setSharedGoals] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [form, setForm] = useState({
@@ -1315,6 +1352,10 @@ function SharedGoalsSection({ session }) {
 
     try {
       const response = await fetch(`${API_BASE_URL}/shared-goals`, { headers: authHeaders });
+      if (response.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not load Shared Goals.');
@@ -1357,6 +1398,10 @@ function SharedGoalsSection({ session }) {
           assignedEmployeeIds: form.assignedEmployeeIds
         })
       });
+      if (response.status === 401) {
+        onUnauthorized?.();
+        return;
+      }
       const data = await response.json();
 
       if (!response.ok) {
@@ -1486,7 +1531,7 @@ function SharedGoalsSection({ session }) {
   );
 }
 
-function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
+function AdminDashboard({ session, activeCycle, onActiveCycleChange, onUnauthorized }) {
   const [dashboard, setDashboard] = useState(null);
   const [completionRows, setCompletionRows] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -1513,6 +1558,11 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
         fetch(`${API_BASE_URL}/admin/escalations`, { headers: authHeaders })
       ]);
 
+      if ([dashboardResponse, completionResponse, auditResponse, escalationResponse].some((response) => response.status === 401)) {
+        onUnauthorized();
+        return;
+      }
+
       const dashboardData = await dashboardResponse.json();
       const completionData = await completionResponse.json();
       const auditData = await auditResponse.json();
@@ -1528,7 +1578,7 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
       setAuditLogs(auditData.auditLogs || []);
       setEscalationData(escalationJson);
     } catch (loadError) {
-      setErrors([loadError.message]);
+      setErrors(['Unable to load admin dashboard. Please refresh or login again.']);
     } finally {
       setIsLoading(false);
     }
@@ -1548,6 +1598,10 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
         headers: authHeaders,
         body: JSON.stringify({ reason: unlockReasonById[sheetId] || '' })
       });
+      if (response.status === 401) {
+        onUnauthorized();
+        return;
+      }
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not unlock Goal Sheet.');
@@ -1567,6 +1621,10 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
       const response = await fetch(`${API_BASE_URL}/admin/reports/achievement.csv`, {
         headers: { Authorization: `Bearer ${session.token}` }
       });
+      if (response.status === 401) {
+        onUnauthorized();
+        return;
+      }
 
       if (!response.ok) throw new Error('Could not export Achievement Report.');
 
@@ -1582,18 +1640,30 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
     }
   };
 
-  const summaryCards = dashboard ? [
-    ['Total Employees', dashboard.summary.totalEmployees],
-    ['Total Managers', dashboard.summary.totalManagers],
-    ['Goal Sheets Draft', dashboard.summary.goalSheetsDraft],
-    ['Goal Sheets Submitted', dashboard.summary.goalSheetsSubmitted],
-    ['Returned for Rework', dashboard.summary.goalSheetsReturned],
-    ['Approved/Locked', dashboard.summary.goalSheetsApprovedLocked],
-    ['Q1 Check-ins', `${dashboard.summary.checkIns.Q1.completed} completed / ${dashboard.summary.checkIns.Q1.pending} pending`],
-    ['Q2 Check-ins', `${dashboard.summary.checkIns.Q2.completed} completed / ${dashboard.summary.checkIns.Q2.pending} pending`],
-    ['Q3 Check-ins', `${dashboard.summary.checkIns.Q3.completed} completed / ${dashboard.summary.checkIns.Q3.pending} pending`],
-    ['Q4 Check-ins', `${dashboard.summary.checkIns.Q4.completed} completed / ${dashboard.summary.checkIns.Q4.pending} pending`]
-  ] : [];
+  const safeSummary = dashboard?.summary || {};
+  const safeCheckIns = safeSummary.checkIns || {};
+  const safeUnlockableGoalSheets = dashboard?.unlockableGoalSheets || [];
+  const safeCompletionRows = completionRows || [];
+  const safeAuditLogs = auditLogs || [];
+  const safeEscalationData = escalationData || { note: '', escalations: [] };
+
+  const getCheckInCard = (quarter) => {
+    const status = safeCheckIns[quarter] || { completed: 0, pending: 0 };
+    return `${status.completed || 0} completed / ${status.pending || 0} pending`;
+  };
+
+  const summaryCards = [
+    ['Total Employees', safeSummary.totalEmployees || 0],
+    ['Total Managers', safeSummary.totalManagers || 0],
+    ['Goal Sheets Draft', safeSummary.goalSheetsDraft || 0],
+    ['Goal Sheets Submitted', safeSummary.goalSheetsSubmitted || 0],
+    ['Returned for Rework', safeSummary.goalSheetsReturned || 0],
+    ['Approved/Locked', safeSummary.goalSheetsApprovedLocked || 0],
+    ['Q1 Check-ins', getCheckInCard('Q1')],
+    ['Q2 Check-ins', getCheckInCard('Q2')],
+    ['Q3 Check-ins', getCheckInCard('Q3')],
+    ['Q4 Check-ins', getCheckInCard('Q4')]
+  ];
 
   return (
     <section className="mx-auto max-w-7xl px-6 py-10">
@@ -1618,6 +1688,10 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
 
       {isLoading ? (
         <p className="text-sm text-muted">Loading Admin Dashboard...</p>
+      ) : errors.length > 0 && !dashboard ? (
+        <div className="rounded-lg border border-line bg-white p-5 shadow-subtle">
+          <p className="text-sm font-semibold text-ink">Unable to load admin dashboard. Please refresh or login again.</p>
+        </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -1632,28 +1706,29 @@ function AdminDashboard({ session, activeCycle, onActiveCycleChange }) {
           <AdminCyclePhase
             session={session}
             activeCycle={activeCycle}
+            onUnauthorized={onUnauthorized}
             onChanged={(cycle) => {
               onActiveCycleChange(cycle);
               loadAdminData();
             }}
           />
-          <AdminEscalationMonitor data={escalationData} />
-          <AdminCompletionTable rows={completionRows} />
-          <SharedGoalsSection session={session} />
+          <AdminEscalationMonitor data={safeEscalationData} />
+          <AdminCompletionTable rows={safeCompletionRows} />
+          <SharedGoalsSection session={session} onUnauthorized={onUnauthorized} />
           <AdminUnlockPanel
-            sheets={dashboard.unlockableGoalSheets}
+            sheets={safeUnlockableGoalSheets}
             reasons={unlockReasonById}
             setReasons={setUnlockReasonById}
             onUnlock={unlockGoalSheet}
           />
-          <AdminAuditTrail logs={auditLogs} />
+          <AdminAuditTrail logs={safeAuditLogs} />
         </>
       )}
     </section>
   );
 }
 
-function AdminCyclePhase({ session, activeCycle, onChanged }) {
+function AdminCyclePhase({ session, activeCycle, onChanged, onUnauthorized }) {
   const [selectedPhase, setSelectedPhase] = useState(activeCycle?.activePhase || 'GOAL_SETTING');
   const [notice, setNotice] = useState('');
   const [errors, setErrors] = useState([]);
@@ -1677,6 +1752,10 @@ function AdminCyclePhase({ session, activeCycle, onChanged }) {
         },
         body: JSON.stringify({ activePhase: selectedPhase })
       });
+      if (response.status === 401) {
+        onUnauthorized();
+        return;
+      }
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || 'Could not update active phase.');
