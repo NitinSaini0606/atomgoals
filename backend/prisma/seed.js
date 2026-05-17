@@ -4,8 +4,23 @@ import { PrismaClient, UserRole } from '@prisma/client';
 const prisma = new PrismaClient();
 const password = 'password123';
 
-const q1Start = new Date('2026-04-01T00:00:00.000Z');
-const q1End = new Date('2026-06-30T23:59:59.000Z');
+const getCurrentQuarter = () => {
+  const now = new Date();
+  return {
+    quarter: `Q${Math.floor(now.getMonth() / 3) + 1}`,
+    year: now.getFullYear()
+  };
+};
+
+const getQuarterDates = (quarter, year) => {
+  const quarterNumber = Number(quarter.replace('Q', ''));
+  const startMonth = (quarterNumber - 1) * 3;
+
+  return {
+    startDate: new Date(Date.UTC(year, startMonth, 1)),
+    endDate: new Date(Date.UTC(year, startMonth + 3, 0, 23, 59, 59))
+  };
+};
 
 async function ensureGoal({ owner, manager, cycle, goalSheet, data }) {
   const existing = await prisma.goal.findFirst({
@@ -114,6 +129,8 @@ async function ensureAuditLog({ actorId, action, entityType, entityId, details }
 
 async function main() {
   const passwordHash = await bcrypt.hash(password, 12);
+  const { quarter: currentQuarter, year: currentYear } = getCurrentQuarter();
+  const { startDate: cycleStart, endDate: cycleEnd } = getQuarterDates(currentQuarter, currentYear);
 
   const manager = await prisma.user.upsert({
     where: { email: 'manager@atomgoals.com' },
@@ -190,20 +207,20 @@ async function main() {
   });
 
   const cycle = await prisma.goalCycle.upsert({
-    where: { year_quarter: { year: 2026, quarter: 'Q1' } },
+    where: { year_quarter: { year: currentYear, quarter: currentQuarter } },
     update: {
       name: 'FY 2026 Goal Cycle',
-      startDate: q1Start,
-      endDate: q1End,
+      startDate: cycleStart,
+      endDate: cycleEnd,
       status: 'ACTIVE',
       activePhase: 'Q1'
     },
     create: {
       name: 'FY 2026 Goal Cycle',
-      quarter: 'Q1',
-      year: 2026,
-      startDate: q1Start,
-      endDate: q1End,
+      quarter: currentQuarter,
+      year: currentYear,
+      startDate: cycleStart,
+      endDate: cycleEnd,
       status: 'ACTIVE',
       activePhase: 'Q1'
     }
