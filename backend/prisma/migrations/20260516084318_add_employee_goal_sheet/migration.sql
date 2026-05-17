@@ -7,7 +7,7 @@
 
 */
 -- AlterTable
-ALTER TABLE `goal` ADD COLUMN `deadline` DATETIME(3) NULL,
+ALTER TABLE `Goal` ADD COLUMN `deadline` DATETIME(3) NULL,
     ADD COLUMN `goalSheetId` INTEGER NOT NULL,
     ADD COLUMN `scoreDirection` ENUM('MIN', 'MAX', 'NONE') NOT NULL DEFAULT 'MIN',
     ADD COLUMN `targetValue` VARCHAR(191) NULL,

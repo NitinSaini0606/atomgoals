@@ -1,16 +1,16 @@
 /*
   Warnings:
 
-  - You are about to drop the column `description` on the `achievement` table. All the data in the column will be lost.
-  - You are about to drop the column `evidenceUrl` on the `achievement` table. All the data in the column will be lost.
-  - You are about to drop the column `impact` on the `achievement` table. All the data in the column will be lost.
-  - You are about to drop the column `title` on the `achievement` table. All the data in the column will be lost.
-  - You are about to drop the column `blockers` on the `checkin` table. All the data in the column will be lost.
-  - You are about to drop the column `employeeComment` on the `checkin` table. All the data in the column will be lost.
-  - You are about to drop the column `goalId` on the `checkin` table. All the data in the column will be lost.
-  - You are about to drop the column `managerComment` on the `checkin` table. All the data in the column will be lost.
-  - You are about to drop the column `progressPercent` on the `checkin` table. All the data in the column will be lost.
-  - You are about to drop the column `summary` on the `checkin` table. All the data in the column will be lost.
+  - You are about to drop the column `description` on the `Achievement` table. All the data in the column will be lost.
+  - You are about to drop the column `evidenceUrl` on the `Achievement` table. All the data in the column will be lost.
+  - You are about to drop the column `impact` on the `Achievement` table. All the data in the column will be lost.
+  - You are about to drop the column `title` on the `Achievement` table. All the data in the column will be lost.
+  - You are about to drop the column `blockers` on the `CheckIn` table. All the data in the column will be lost.
+  - You are about to drop the column `employeeComment` on the `CheckIn` table. All the data in the column will be lost.
+  - You are about to drop the column `goalId` on the `CheckIn` table. All the data in the column will be lost.
+  - You are about to drop the column `managerComment` on the `CheckIn` table. All the data in the column will be lost.
+  - You are about to drop the column `progressPercent` on the `CheckIn` table. All the data in the column will be lost.
+  - You are about to drop the column `summary` on the `CheckIn` table. All the data in the column will be lost.
   - A unique constraint covering the columns `[goalId,quarter]` on the table `Achievement` will be added. If there are existing duplicate values, this will fail.
   - A unique constraint covering the columns `[userId,managerId,quarter]` on the table `CheckIn` will be added. If there are existing duplicate values, this will fail.
   - Added the required column `quarter` to the `Achievement` table without a default value. This is not possible if the table is not empty.
@@ -19,16 +19,16 @@
 
 */
 -- DropForeignKey
-ALTER TABLE `checkin` DROP FOREIGN KEY `CheckIn_cycleId_fkey`;
+ALTER TABLE `CheckIn` DROP FOREIGN KEY `CheckIn_cycleId_fkey`;
 
 -- DropForeignKey
-ALTER TABLE `checkin` DROP FOREIGN KEY `CheckIn_goalId_fkey`;
+ALTER TABLE `CheckIn` DROP FOREIGN KEY `CheckIn_goalId_fkey`;
 
 -- DropIndex
-DROP INDEX `CheckIn_goalId_idx` ON `checkin`;
+DROP INDEX `CheckIn_goalId_idx` ON `CheckIn`;
 
 -- AlterTable
-ALTER TABLE `achievement` DROP COLUMN `description`,
+ALTER TABLE `Achievement` DROP COLUMN `description`,
     DROP COLUMN `evidenceUrl`,
     DROP COLUMN `impact`,
     DROP COLUMN `title`,
@@ -41,7 +41,7 @@ ALTER TABLE `achievement` DROP COLUMN `description`,
     ADD COLUMN `weightedScore` DOUBLE NOT NULL DEFAULT 0;
 
 -- AlterTable
-ALTER TABLE `checkin` DROP COLUMN `blockers`,
+ALTER TABLE `CheckIn` DROP COLUMN `blockers`,
     DROP COLUMN `employeeComment`,
     DROP COLUMN `goalId`,
     DROP COLUMN `managerComment`,
