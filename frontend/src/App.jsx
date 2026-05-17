@@ -1773,7 +1773,7 @@ function AdminCyclePhase({ session, activeCycle, onChanged, onUnauthorized }) {
         <div>
           <h3 className="text-lg font-semibold">Cycle & Phase Management</h3>
           <p className="mt-1 text-sm text-muted">
-            Set the displayed active phase for the current cycle. This does not enforce workflow restrictions yet.
+            Active phase controls which workflow actions are currently allowed across Goal Setting and Quarterly Check-ins.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
